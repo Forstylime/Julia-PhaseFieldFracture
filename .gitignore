@@ -1,0 +1,15 @@
+.vscode/
+data/
+
+# Julia build/cache artifacts
+*.ji
+*.cov
+*.mem
+*.jl.cov
+deps/deps.jl
+build/
+compiled/
+
+# Local environment noise
+.DS_Store
+*.log
