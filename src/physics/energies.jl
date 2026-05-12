@@ -1,9 +1,21 @@
-Base.@kwdef struct MaterialParameters{T}
+struct MaterialParameters{T}
     lambda::T
     mu::T
     gc::T
     ell::T
-    kappa::T = zero(T)
+    kappa::T
+end
+
+function MaterialParameters(; lambda, mu, gc, ell, kappa = nothing)
+    T = promote_type(typeof(lambda), typeof(mu), typeof(gc), typeof(ell))
+    kappa_value = isnothing(kappa) ? zero(T) : kappa
+    return MaterialParameters{promote_type(T, typeof(kappa_value))}(
+        lambda,
+        mu,
+        gc,
+        ell,
+        kappa_value,
+    )
 end
 
 degradation(d) = (1 - d)^2

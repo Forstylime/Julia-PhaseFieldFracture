@@ -2,7 +2,8 @@ module PhaseFieldFracture
 
 using LinearAlgebra
 using SparseArrays
-import Ferrite
+using Ferrite
+using Tensors
 
 include("physics/energies.jl")
 include("physics/constitutive.jl")
@@ -23,7 +24,9 @@ include("utils/io.jl")
 include("utils/metrics.jl")
 
 export MaterialParameters,
+    PhaseFieldMaterial,
     spectral_decomposition,
+    positive_strain,
     stress,
     tensile_energy_density,
     fracture_energy_density,
@@ -39,6 +42,9 @@ export MaterialParameters,
     initial_crack_nodes,
     setup_square_tension,
     assemble_system!,
+    assemble_u!,
+    assemble_d!,
+    update_history!,
     MonolithicMEMOptions,
     solve_monolithic_mem,
     StaggeredOptions,
@@ -50,6 +56,7 @@ export MaterialParameters,
     make_ct_specimen_mesh,
     write_results,
     SimulationMetrics,
-    record_step!
-
+    record_step!,
+    create_simple_tension_grid,
+    Diagonal
 end

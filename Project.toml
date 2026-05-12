@@ -1,3 +1,8 @@
+name = "PhaseFieldFracture"
+uuid = "1b8d234a-9c42-4f3b-8d1e-7a2c9b4e6d8f"
+version = "0.1.0"
+authors = ["Weiqian Xu"]
+
 [deps]
 BlockArrays = "8e7c35d0-a365-5155-bbbb-fb81a777f24e"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
