@@ -26,51 +26,17 @@ end
 
 Macaulay 括号，用于提取正数或负数部分，对应论文公式里的 ⟨x⟩±。
 """
-macauley_plus(x::Real) = max(x, zero(x))
-macauley_minus(x::Real) = min(x, zero(x))
+
+@inline macauley_plus(x::Real) = max(x, zero(x))
+@inline macauley_minus(x::Real) = min(x, zero(x))
 
 """
-    spectral_decomposition(strain::AbstractMatrix)
-
-兼容矩阵形式应变输入的谱分解接口，返回特征值和特征向量。
-该方法保留早期测试和工具函数使用的矩阵 API。
-"""
-function spectral_decomposition(strain::AbstractMatrix)
-    F = eigen(Symmetric(strain))
-    return F.values, F.vectors
-end
-
-"""
-    positive_strain(strain::AbstractMatrix)
-
-返回矩阵应变的正谱部分，用于旧的 `MaterialParameters` 工作流。
-"""
-function positive_strain(strain::AbstractMatrix)
-    values, vectors = spectral_decomposition(strain)
-    positive_values = Diagonal(map(v -> max(v, zero(v)), values))
-    return vectors * positive_values * vectors'
-end
-
-"""
-    stress(strain, d, material::MaterialParameters)
-
-基于旧 `MaterialParameters` 类型的拉伸谱分解应力计算。
-保留该方法可以避免现有测试和脚本在引入 `PhaseFieldMaterial` 后失效。
-"""
-function stress(strain::AbstractMatrix, d, material::MaterialParameters)
-    eps_pos = positive_strain(strain)
-    tr_pos = tr(eps_pos)
-    sigma_pos = material.lambda * tr_pos * I + 2 * material.mu * eps_pos
-    return residual_degradation(d, material.kappa) * sigma_pos
-end
-
-"""
-    spectral_decomposition(ε::SymmetricTensor{2, 2})
+    strain_spectral_split(ε::SymmetricTensor{2, 2})
 
 对 2D 应变张量进行谱分解，返回正部分 ε+ 和负部分 ε-。
 对应论文 Eq. (4)。
 """
-function spectral_decomposition(ε::SymmetricTensor{2, 2, T}) where T
+function strain_spectral_split(ε::SymmetricTensor{2, 2, T}) where T
     # 对对称张量求特征值和特征向量
     # 注意：因为 ForwardDiff 传进来的类型 T 可能是 Dual 数，
     # 这里我们保证类型泛型 T，以支持自动微分穿透！
@@ -97,7 +63,7 @@ end
 """
 function elastic_energy_density(ε::SymmetricTensor{2,2,T}, d::Real, mat::PhaseFieldMaterial) where T
     # 1. 谱分解得到拉伸与压缩应变
-    ε_plus, ε_minus = spectral_decomposition(ε)
+    ε_plus, ε_minus = strain_spectral_split(ε)
     
     # 2. 计算纯净材料的拉伸能量 Ψ0+ 和压缩能量 Ψ0-
     # tr(ε) 也就是应变张量的迹
@@ -121,7 +87,7 @@ end
 对应论文 Eq. (18) 中的 Ψ0+(ε(u)).
 """
 function tensile_energy_density(ε::SymmetricTensor{2,2,T}, mat::PhaseFieldMaterial) where T
-    ε_plus, _ = spectral_decomposition(ε)
+    ε_plus, _ = strain_spectral_split(ε)
     tr_ε = tr(ε)
     return (mat.λ / 2) * macauley_plus(tr_ε)^2 + mat.μ * tr(ε_plus ⋅ ε_plus)
 end

@@ -11,6 +11,9 @@ setup = setup_square_tension(
     crack_x_max = 0.5        # 一直切到中心 x=0.5
 )
 
+# 把网格写出到 VTK 文件，方便用 ParaView 可视化检查网格质量和边界条件设置。
+Ferrite.write_vtk("data/mesh/daa_mesh", grid)
+
 mat = PhaseFieldMaterial(
     E = 210e3,
     ν = 0.3,
@@ -19,6 +22,6 @@ mat = PhaseFieldMaterial(
     k_tol = 1e-8
 )
 
-disp, force = solve_staggered(setup, mat; n_steps = 100, max_u_disp = 0.02)
+disp, force = solve_staggered(setup, mat; n_steps = 100, max_u_disp = 0.02, max_iter = 100)
 
 println("大功告成！你可以用 ParaView 打开 data/sims/ 下的 .vtu 文件看裂纹扩展了！")

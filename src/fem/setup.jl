@@ -66,6 +66,9 @@ function create_staggered_dofhandlers(grid)
     # 关闭后才能查询自由度数量、组装矩阵或创建约束。
     Ferrite.close!(dh_d)
 
+    println("位移自由度数量: ", Ferrite.ndofs(dh_u))
+    println("相场自由度数量: ", Ferrite.ndofs(dh_d))
+
     return dh_u, dh_d
 end
 

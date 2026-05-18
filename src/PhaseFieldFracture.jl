@@ -26,6 +26,7 @@ include("utils/metrics.jl")
 export MaterialParameters,
     PhaseFieldMaterial,
     spectral_decomposition,
+    strain_spectral_split,
     positive_strain,
     stress,
     tensile_energy_density,

@@ -5,12 +5,6 @@ using Tensors
 using LinearAlgebra
 using SparseArrays
 
-function assemble_system!(K, R, state, mesh, material::MaterialParameters)
-    fill!(K, zero(eltype(K)))
-    fill!(R, zero(eltype(R)))
-    return K, R
-end
-
 """
     assemble_u!(K, R, dh_u, dh_d, u, d, mat, cv_u, cv_d)
 
