@@ -1,27 +1,38 @@
-# src/utils/meshes.jl
+"""
+    refine_range(L, n; center=0.0, ratio=3.0)
 
-using Ferrite
+生成 `n` 个节点在区间 `[-L/2, L/2]` 上的一维坐标，在 `center` 附近加密。
+
+使用 sinh 函数实现节点从粗到细的平滑过渡：
+- `ratio = 1.0`  → 均匀分布。
+- `ratio > 1.0`  → `center` 附近加密。
+- `ratio` 越大加密越强（建议 3.0 ~ 5.0）。
+"""
+function refine_range(L, n::Int; center::Float64 = 0.0, ratio::Float64 = 3.0)
+    half = L / 2
+    xs = range(-1.0, 1.0, length = n)
+    stretched = sinh.(ratio .* xs) ./ sinh(ratio)
+    return center .+ half .* stretched
+end
 
 """
-生成一个带有初始裂纹标记的 2D 正方形网格 (用于基础拉伸测试)
-- L: 边长
-- nx, ny: x 和 y 方向的单元数量
+    refine_grid!(grid, x_coords, y_coords)
+
+将已有 Ferrite 网格的节点坐标替换为指定的非均匀坐标。
+
+假设 `grid` 是由 `nx × ny` 个节点组成的结构化四边形网格，
+节点按列优先排列（与 `Ferrite.generate_grid(Quadrilateral, ...)` 一致）。
 """
-function create_simple_tension_grid(L::Float64, nx::Int, ny::Int)
-    # 1. 生成标准的四边形网格 (从 0,0 到 L,L)
-    # 采用 Quadrilateral (四边形单元)，这样对于弹塑性/断裂的精度比三角形好
-    grid = generate_grid(Quadrilateral, (nx, ny), Vec(0.0, 0.0), Vec(L, L))
-    
-    # 2. 为网格添加面集 (Face Sets)，用于施加位移边界条件
-    # 底边: y = 0
-    # addfacetset!(grid, "bottom", x -> x[2] ≈ 0.0)
-    # 顶边: y = L
-    # addfacetset!(grid, "top", x -> x[2] ≈ L)
-    
-    # 3. 为网格添加节点集 (Node Sets)，用于定义预制裂纹
-    # 经典相场设置：我们在左侧中间水平切一刀，长度为 L/2
-    # 这里我们把落在这个线段上的节点找出来，打上 "crack" 标签
-    addnodeset!(grid, "crack", x -> x[2] ≈ L/2 && x[1] <= L/2)
+function refine_grid!(grid, x_coords::Vector{Float64}, y_coords::Vector{Float64})
+    nx = length(x_coords)
+    ny = length(y_coords)
+
+    for j in 1:ny
+        for i in 1:nx
+            idx = (j - 1) * nx + i
+            grid.nodes[idx] = Ferrite.Node((x_coords[i], y_coords[j]))
+        end
+    end
 
     return grid
 end

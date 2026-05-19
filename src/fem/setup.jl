@@ -16,24 +16,76 @@ Base.@kwdef struct SquareTensionSetup{G,DHU,DHD,CHU,CHD,N}
 end
 
 """
-    make_square_tension_grid(cells = (50, 50))
+    make_square_tension_grid(cells = (100, 100); xlims = (-1.0, 1.0), ylims = (-1.0, 1.0),
+                             refine_y_center = nothing, refine_ratio = 3.0)
 
-生成方形拉伸算例使用的二维四边形结构网格。
+生成方形拉伸算例使用的二维四边形结构网格，支持局部细化。
 
-# 功能
-- 调用 `Ferrite.generate_grid` 创建 `cells[1] * cells[2]` 个四节点四边形单元。
-- Ferrite 默认会为生成网格附带 `"bottom"`、`"top"` 等边界集合，
-  后续位移约束会直接使用这些集合。
+# 参数
+- `cells`: x、y 方向的单元数量。
+- `xlims`, `ylims`: 计算域的坐标范围。
+- `refine_y_center`: y 方向加密中心。`nothing` 时 y 方向均匀划分。
+  设为 `0.0` 可在裂纹高度处加密 y 方向网格。
+- `refine_ratio`: 加密强度，> 1 时中心更密（建议 3.0 ~ 5.0），
+  = 1 时退化为均匀分布。
 
 # 使用方法
 ```julia
-grid = make_square_tension_grid((40, 40))
+# 均匀网格（原有行为）
+grid = make_square_tension_grid((100, 100))
+
+# y 方向在 y=0（裂纹线）附近加密
+grid = make_square_tension_grid((100, 100); refine_y_center = 0.0, refine_ratio = 4.0)
 ```
 """
-function make_square_tension_grid(cells::NTuple{2,Int} = (50, 50))
-    # 使用 Ferrite 内置网格生成器，保证网格类型和边界 facet set 与
-    # 后续 `ConstraintHandler` 的约束设置保持一致。
-    return Ferrite.generate_grid(Ferrite.Quadrilateral, cells)
+function make_square_tension_grid(
+    cells::NTuple{2,Int} = (100, 100);
+    xlims::NTuple{2,Float64} = (-1.0, 1.0),
+    ylims::NTuple{2,Float64} = (-1.0, 1.0),
+    refine_y_center::Union{Float64,Nothing} = 0.0,
+    refine_x_center::Union{Float64,Nothing} = nothing,
+    refine_ratio::Float64 = 3.0,
+)
+    nx, ny = cells
+    n_nodes_x, n_nodes_y = nx + 1, ny + 1
+
+    # 先用 Ferrite 生成均匀网格，获得正确的拓扑和边界 facet set
+    grid = Ferrite.generate_grid(
+        Ferrite.Quadrilateral, (nx, ny),
+        Ferrite.Vec(xlims[1], ylims[1]),
+        Ferrite.Vec(xlims[2], ylims[2]),
+    )
+
+    # 如果不需要加密，直接返回均匀网格
+    if refine_x_center === nothing && refine_y_center === nothing
+        return grid
+    end
+
+    # x 方向坐标（n_nodes_x 个节点）
+    if refine_x_center !== nothing
+        Lx = xlims[2] - xlims[1]
+        xc = refine_x_center
+        x = refine_range(Lx, n_nodes_x; center = xc, ratio = refine_ratio)
+        x .+= (xc - (x[1] + x[end]) / 2)
+        xv = collect(x)
+    else
+        xv = collect(range(Float64(xlims[1]), Float64(xlims[2]), length = n_nodes_x))
+    end
+
+    # y 方向坐标（n_nodes_y 个节点）
+    if refine_y_center !== nothing
+        Ly = ylims[2] - ylims[1]
+        yc = refine_y_center
+        y = refine_range(Ly, n_nodes_y; center = yc, ratio = refine_ratio)
+        y .+= (yc - (y[1] + y[end]) / 2)
+        yv = collect(y)
+    else
+        yv = collect(range(Float64(ylims[1]), Float64(ylims[2]), length = n_nodes_y))
+    end
+
+    # 修改节点坐标以匹配非均匀分布
+    refine_grid!(grid, xv, yv)
+    return grid
 end
 
 """
@@ -155,7 +207,7 @@ function initial_crack_nodes(
     y = 0.0,
     x_min = -1.0,
     x_max = 0.0,
-    half_width = 1e-10,
+    half_width = 1e-8,
 )
     nodes = Int[]
     # 遍历 Ferrite 网格节点；`pairs` 同时给出节点编号和节点对象。
@@ -208,7 +260,7 @@ crack_nodes = setup.crack_nodes
 - `crack_half_width`：筛选裂纹节点时使用的半宽容差。
 """
 function setup_square_tension(;
-    cells::NTuple{2,Int} = (50, 50),
+    cells::NTuple{2,Int} = (100, 100),
     top_displacement = 0.0,
     crack_y = 0.0,
     crack_x_min = -1.0,
