@@ -1,7 +1,7 @@
 """
     SquareTensionSetup
 
-保存方形拉伸相场断裂算例的有限元初始化结果。
+保存方形拉伸相场断裂算例的有限元初始化结果。也可以用于其他几何相似的算例（如 L 形拉伸），只要保证网格和边界条件设置与求解器要求一致。
 
 该结构体把后续求解器需要反复使用的对象集中在一起：计算网格、位移场和
 相场的自由度处理器、两类场的约束处理器，以及用于设置预制裂纹的节点编号。
@@ -90,6 +90,24 @@ function make_square_tension_grid(
 end
 
 """
+    create_l_shape_grid(msh_file = "data/mesh/l_shape.msh")
+    生成 L 形算例使用的二维四边形结构网格。
+    网格一般已在Gmsh中生成好，直接从 .msh 文件读取。
+"""
+function create_l_shape_grid(msh_file = "data/mesh/l_shape.msh")
+    cache_file = msh_file * ".jls"
+    if isfile(cache_file) && mtime(cache_file) >= mtime(msh_file)
+        println("从缓存加载网格: ", cache_file)
+        return deserialize(cache_file)
+    end
+    println("解析 .msh 文件: ", msh_file)
+    grid = FerriteGmsh.togrid(msh_file)
+    serialize(cache_file, grid)
+    println("网格已缓存至: ", cache_file)
+    return grid
+end
+
+"""
     create_staggered_dofhandlers(grid)
 
 为交错求解格式创建位移场和相场各自的自由度处理器。
@@ -131,8 +149,8 @@ end
 创建位移场的 Dirichlet 边界条件。
 
 # 功能
-- 底边 `"bottom"` 的两个位移分量均固定为 0，消除刚体运动。
-- 顶边 `"top"` 的竖向位移分量施加为 `t * final_displacement`，
+- 底边 `"bottom"`或者顶边 `"top"` 的两个位移分量均固定为 0，消除刚体运动。
+- 顶边 `"top"`或者右边界 `"right"` 的竖向位移分量施加为 `t * final_displacement`，
   其中 `t` 由 `Ferrite.update!(ch_u, t)` 控制，可用于增量加载。
 - 水平位移分量在顶边不额外约束。
 
@@ -145,18 +163,18 @@ function create_displacement_constraints(dh_u, grid; final_displacement = 0.0)
     ch_u = Ferrite.ConstraintHandler(dh_u)
 
     # 读取网格生成阶段创建的边界 facet set。
-    bottom = Ferrite.getfacetset(grid, "bottom")
     top = Ferrite.getfacetset(grid, "top")
+    right = Ferrite.getfacetset(grid, "right")
 
-    # 底边 ux、uy 全固定，作为拉伸试样的支承边界。
+    # 顶边 ux、uy 全固定，作为拉伸试样的支承边界。
     Ferrite.add!(
         ch_u,
-        Ferrite.Dirichlet(:u, bottom, (x, t) -> zeros(2), [1, 2]),
+        Ferrite.Dirichlet(:u, top, (x, t) -> zeros(2), [1, 2]),
     )
-    # 顶边只约束第 2 个位移分量 uy；加载幅值通过时间/载荷参数 t 缩放。
+    # 右边界只约束第 2 个位移分量 uy；加载幅值通过时间/载荷参数 t 缩放。
     Ferrite.add!(
         ch_u,
-        Ferrite.Dirichlet(:u, top, (x, t) -> t * final_displacement, 2),
+        Ferrite.Dirichlet(:u, right, (x, t) -> t * final_displacement, 2),
     )
 
     # 关闭约束处理器并在 t = 0 时初始化约束值。
@@ -289,4 +307,26 @@ function setup_square_tension(;
 
     # 统一封装初始化结果，减少求解脚本需要手动传递的对象数量。
     return SquareTensionSetup(; grid, dh_u, dh_d, ch_u, ch_d, crack_nodes, final_displacement)
+end
+
+"""
+    setup_l_tension(; msh_file = "data/mesh/l_shape.msh", final_displacement = 0.0)
+    构建 L 形拉伸相场断裂算例的有限元初始化对象。
+    一般不需要预置裂纹，L 形几何本身会引导裂纹从内角处自然萌生。
+"""
+function setup_l_tension(;
+    msh_file = "data/mesh/l_shape.msh",
+    final_displacement = 0.0,
+)
+    # 1. 创建计算网格，后续所有自由度和边界集合都基于同一个 grid。
+    grid = create_l_shape_grid(msh_file)
+    # 2. 分别为位移场 u 和相场 d 建立自由度编号，适配交错求解流程。
+    dh_u, dh_d = create_staggered_dofhandlers(grid)
+    # 3. 设置力学边界条件：上边(top)固定，右边(right)施加竖直向下位移加载。
+    ch_u = create_displacement_constraints(dh_u, grid; final_displacement)
+    # 4. 创建相场约束处理器。
+    ch_d = create_phase_field_constraints(dh_d, Int[]) # L 形算例通常不需要预置裂纹，传入空节点列表。
+
+    # 统一封装初始化结果，减少求解脚本需要手动传递的对象数量。
+    return SquareTensionSetup(; grid, dh_u, dh_d, ch_u, ch_d, crack_nodes = Int[], final_displacement)
 end

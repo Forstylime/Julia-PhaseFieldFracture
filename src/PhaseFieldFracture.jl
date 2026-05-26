@@ -1,8 +1,10 @@
 module PhaseFieldFracture
 
 using LinearAlgebra
+using Serialization
 using SparseArrays
 using Ferrite
+using FerriteGmsh
 using Tensors
 
 # include("physics/energies.jl")
@@ -31,11 +33,13 @@ export MaterialParameters,
     refine_range,
     refine_grid!,
     make_square_tension_grid,
+    create_l_shape_grid,
     create_staggered_dofhandlers,
     create_displacement_constraints,
     create_phase_field_constraints,
     initial_crack_nodes,
     setup_square_tension,
+    setup_l_tension,
     assemble_u!,
     assemble_d!,
     update_history!,

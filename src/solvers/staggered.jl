@@ -25,7 +25,7 @@ function solve_staggered(
     ch_u = setup.ch_u
     ch_d = setup.ch_d
 
-    # 构建节点→位移自由度映射 (1=x, 2=y)，用于提取顶边反力
+    # 构建节点→位移自由度映射 (1=x, 2=y)，用于提取右边反力
     node_dofs_u = zeros(Int, 2, getnnodes(grid))
     for cell_id in 1:getncells(grid)
         cell = getcells(grid, cell_id)
@@ -36,11 +36,11 @@ function solve_staggered(
         end
     end
 
-    # 筛选 y 坐标最大的节点（顶边），取出其竖向位移自由度编号
-    coords_y = [node.x[2] for node in grid.nodes]
-    top_y = maximum(coords_y)
-    top_nodes = findall(y -> isapprox(y, top_y; atol = 1e-12, rtol = 1e-12), coords_y)
-    top_y_dofs = [node_dofs_u[2, node_id] for node_id in top_nodes]
+    # 筛选 x 坐标最大的节点（右边），取出其竖向位移自由度编号
+    coords_x = [node.x[1] for node in grid.nodes]
+    right_x = maximum(coords_x)
+    right_nodes = findall(x -> isapprox(x, right_x; atol = 1e-12, rtol = 1e-12), coords_x)
+    right_x_dofs = [node_dofs_u[2, node_id] for node_id in right_nodes]
     
     ndofs_u = ndofs(dh_u)
     ndofs_d = ndofs(dh_d)
@@ -72,8 +72,8 @@ function solve_staggered(
     F_d = zeros(ndofs_d)
     
     # 记录反力-位移曲线用的数组
-    reaction_forces = Float64[]
-    displacements = Float64[]
+    reaction_forces = Float64[0]
+    displacements = Float64[0]
     
     # 建立 VTK 输出文件夹
     mkpath("data/sims")
@@ -91,7 +91,7 @@ function solve_staggered(
         apply!(u_n, ch_u)
         apply!(d_n, ch_d)
         
-        println("=== 载荷步 $step / $n_steps | 顶方位移: $(round(current_disp, digits=5)) ===")
+        println("=== 载荷步 $step / $n_steps | 位移: $(round(current_disp, digits=5)) ===")
         
         # --- 4. 开启内层 Staggered 交错循环 ---
         for iter in 1:max_iter
@@ -169,11 +169,11 @@ function solve_staggered(
         # 计算整张网格的内力 (包含所有未被零化边界条件破坏的力)
         assemble_u!(K_u, R_u, dh_u, dh_d, u_n, d_n, mat, cv_u, cv_d)
         
-        # 提取顶部竖向位移自由度的反力并求和，避免把底边支座反力混入曲线。
-        f_y_total = sum(R_u[dof] for dof in top_y_dofs)
+        # 提取右边竖向位移自由度的反力并求和，得到总反力
+        f__total = sum(R_u[dof] for dof in right_x_dofs)
         
         push!(displacements, current_disp)
-        push!(reaction_forces, f_y_total)
+        push!(reaction_forces, f__total)
         
         # 每隔 5 步输出一次 VTK 以节约硬盘
         if step % 5 == 0 || step == n_steps
