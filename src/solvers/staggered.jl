@@ -4,52 +4,17 @@ using Ferrite
 using LinearAlgebra
 using SparseArrays
 
-function _nodal_dof_map(dh::DofHandler; components::Int = 1)
-    grid = Ferrite.get_grid(dh)
-    node_dofs = zeros(Int, components, getnnodes(grid))
-
-    for cell_id in 1:getncells(grid)
-        cell = getcells(grid, cell_id)
-        dofs = celldofs(dh, cell_id)
-        for (local_node, node_id) in pairs(cell.nodes)
-            for component in 1:components
-                node_dofs[component, node_id] = dofs[(local_node - 1) * components + component]
-            end
-        end
-    end
-
-    return node_dofs
-end
-
-function _crack_constraint_handler(dh_d::DofHandler, crack_nodes)
-    ch_d = ConstraintHandler(dh_d)
-    if !isempty(crack_nodes)
-        add!(ch_d, Dirichlet(:d, collect(crack_nodes), (x, t) -> 1.0))
-    end
-    close!(ch_d)
-    update!(ch_d, 0.0)
-    return ch_d
-end
-
-function _top_component_dofs(dh_u::DofHandler, grid, component::Int)
-    coords_y = [node.x[2] for node in grid.nodes]
-    top_y = maximum(coords_y)
-    top_nodes = findall(y -> isapprox(y, top_y; atol = 1e-12, rtol = 1e-12), coords_y)
-    node_dofs = _nodal_dof_map(dh_u; components = 2)
-    return [node_dofs[component, node_id] for node_id in top_nodes]
-end
-
 """
-    solve_staggered(setup::SquareTensionSetup, mat::PhaseFieldMaterial; 
-                    n_steps = 100, max_u_disp = 0.01, tol = 1e-4)
+    solve_staggered(setup::SquareTensionSetup, mat::PhaseFieldMaterial;
+                    n_steps = 100, tol = 1e-4)
 
 执行标准交错求解法 (Staggered Scheme)。
 在每个载荷步中，交错求解位移场和相场，直到残差收敛。
+位移加载幅值从 setup.final_displacement 读取。
 """
 function solve_staggered(
     setup::SquareTensionSetup, mat::PhaseFieldMaterial;
     n_steps = 100,          # 总载荷步数 (论文设为 100 步)
-    max_u_disp = 0.01,      # 顶部的最大位移加载量 (mm)
     tol = 1e-4,             # Newton 迭代和交错循环的收敛容差
     max_iter = 20           # 内层交错循环的最大允许次数
 )
@@ -57,9 +22,25 @@ function solve_staggered(
     grid = setup.grid
     dh_u = setup.dh_u
     dh_d = setup.dh_d
-    ch_u = create_displacement_constraints(dh_u, grid; top_displacement = max_u_disp)
-    ch_d = _crack_constraint_handler(dh_d, setup.crack_nodes)
-    top_y_dofs = _top_component_dofs(dh_u, grid, 2)
+    ch_u = setup.ch_u
+    ch_d = setup.ch_d
+
+    # 构建节点→位移自由度映射 (1=x, 2=y)，用于提取顶边反力
+    node_dofs_u = zeros(Int, 2, getnnodes(grid))
+    for cell_id in 1:getncells(grid)
+        cell = getcells(grid, cell_id)
+        dofs = celldofs(dh_u, cell_id)
+        for (local_node, node_id) in pairs(cell.nodes)
+            node_dofs_u[1, node_id] = dofs[(local_node - 1) * 2 + 1]
+            node_dofs_u[2, node_id] = dofs[(local_node - 1) * 2 + 2]
+        end
+    end
+
+    # 筛选 y 坐标最大的节点（顶边），取出其竖向位移自由度编号
+    coords_y = [node.x[2] for node in grid.nodes]
+    top_y = maximum(coords_y)
+    top_nodes = findall(y -> isapprox(y, top_y; atol = 1e-12, rtol = 1e-12), coords_y)
+    top_y_dofs = [node_dofs_u[2, node_id] for node_id in top_nodes]
     
     ndofs_u = ndofs(dh_u)
     ndofs_d = ndofs(dh_d)
@@ -101,7 +82,7 @@ function solve_staggered(
     println("开始 Staggered 交错求解，总步数: $n_steps")
     for step in 1:n_steps
         # 更新当前的位移加载幅值
-        current_disp = (step / n_steps) * max_u_disp
+        current_disp = (step / n_steps) * setup.final_displacement
         update!(ch_u, step / n_steps) 
         
         # 将上一载荷步的解作为本步预测值
@@ -121,24 +102,25 @@ function solve_staggered(
             newton_iter = 0
             u_residual_norm = 1.0
             
+            # 1. 进入循环前，先进行首次组装（假设此时 u_n 已应用了当前载荷步的非零边界条件）
+            assemble_u!(K_u, R_u, dh_u, dh_d, u_n, d_n, mat, cv_u, cv_d)
+            apply_zero!(K_u, R_u, ch_u)
+            u_residual_norm = norm(R_u)
+
             while u_residual_norm > tol && newton_iter < 10
-                assemble_u!(K_u, R_u, dh_u, dh_d, u_n, d_n, mat, cv_u, cv_d)
-                # 应用 u 的位移边界条件 (直接修改矩阵和残差)
-                apply_zero!(K_u, R_u, ch_u)
-                
-                # R_u 是内力，方程应为 K_u * Δu = -R_u 
-                # 但根据 assemble_u 的定义我们可能需要检查正负号
-                # 简单起见，标准的 Newton 形式为 K * Δu = -R
+                # 2. 求解位移增量（注意：-R_u 会产生临时分配，若追求极致性能可用 ldiv! 并提前取反）
                 Δu = K_u \ (-R_u)
-                apply_zero!(Δu, ch_u) # 边界节点增量为0
+                apply_zero!(Δu, ch_u) # 确保边界处的增量严格为 0
                 
+                # 3. 更新位移
                 u_n .+= Δu
                 
-                # 重新计算残差的范数作为收敛判断
+                # 4. 在新的位移下组装，为下一次迭代（或退出条件判断）做准备
                 assemble_u!(K_u, R_u, dh_u, dh_d, u_n, d_n, mat, cv_u, cv_d)
                 apply_zero!(K_u, R_u, ch_u)
-                u_residual_norm = norm(R_u)
                 
+                # 5. 更新残差范数和迭代步数
+                u_residual_norm = norm(R_u)
                 newton_iter += 1
             end
             
@@ -165,13 +147,15 @@ function solve_staggered(
             # 判断准则：这一轮更新的相场，与上一轮相比变化极小
             d_error = norm(d_n - d_old_iter)
             
-            println("  - 交错迭代 $iter: Newton_iters=$newton_iter, Δd_error=$(round(d_error, sigdigits=4))")
+            if mod(iter, 5) == 0 
+                @info " - 交错迭代 $iter, Δd_error=$(round(d_error, sigdigits=4))"
+            end
             
             if d_error < tol
                 break # 交错循环收敛，跳出内层 for
             end
             if iter == max_iter
-                @warn "  载荷步 $step 在最大交错迭代次数内未收敛！"
+                @warn " - 载荷步 $step 在最大交错迭代次数内未收敛！- "
             end
         end # 内层交错循环结束
         

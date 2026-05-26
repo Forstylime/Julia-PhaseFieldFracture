@@ -13,6 +13,7 @@ Base.@kwdef struct SquareTensionSetup{G,DHU,DHD,CHU,CHD,N}
     ch_u::CHU
     ch_d::CHD
     crack_nodes::N
+    final_displacement::Float64
 end
 
 """
@@ -125,22 +126,22 @@ function create_staggered_dofhandlers(grid)
 end
 
 """
-    create_displacement_constraints(dh_u, grid; top_displacement = 0.0)
+    create_displacement_constraints(dh_u, grid; final_displacement = 0.0)
 
 创建位移场的 Dirichlet 边界条件。
 
 # 功能
 - 底边 `"bottom"` 的两个位移分量均固定为 0，消除刚体运动。
-- 顶边 `"top"` 的竖向位移分量施加为 `t * top_displacement`，
+- 顶边 `"top"` 的竖向位移分量施加为 `t * final_displacement`，
   其中 `t` 由 `Ferrite.update!(ch_u, t)` 控制，可用于增量加载。
 - 水平位移分量在顶边不额外约束。
 
 # 使用方法
 ```julia
-ch_u = create_displacement_constraints(dh_u, grid; top_displacement = 0.01)
+ch_u = create_displacement_constraints(dh_u, grid; final_displacement = 0.01)
 ```
 """
-function create_displacement_constraints(dh_u, grid; top_displacement = 0.0)
+function create_displacement_constraints(dh_u, grid; final_displacement = 0.0)
     ch_u = Ferrite.ConstraintHandler(dh_u)
 
     # 读取网格生成阶段创建的边界 facet set。
@@ -155,7 +156,7 @@ function create_displacement_constraints(dh_u, grid; top_displacement = 0.0)
     # 顶边只约束第 2 个位移分量 uy；加载幅值通过时间/载荷参数 t 缩放。
     Ferrite.add!(
         ch_u,
-        Ferrite.Dirichlet(:u, top, (x, t) -> t * top_displacement, 2),
+        Ferrite.Dirichlet(:u, top, (x, t) -> t * final_displacement, 2),
     )
 
     # 关闭约束处理器并在 t = 0 时初始化约束值。
@@ -165,23 +166,25 @@ function create_displacement_constraints(dh_u, grid; top_displacement = 0.0)
 end
 
 """
-    create_phase_field_constraints(dh_d)
+    create_phase_field_constraints(dh_d, crack_nodes)
 
 创建相场变量的约束处理器。
 
 # 功能
-- 当前没有对相场 `:d` 添加显式 Dirichlet 约束。
-- 仍然返回一个已关闭并初始化过的 `ConstraintHandler`，使相场组装和求解流程
-  可以与位移场保持统一接口。
+- 在 `crack_nodes` 上施加 Dirichlet BC，固定 d = 1 (预制裂纹)。
+- 若 `crack_nodes` 为空，则不添加任何约束（相场完全自由演化）。
+- 返回已关闭并初始化过的 `ConstraintHandler`。
 
 # 使用方法
 ```julia
-ch_d = create_phase_field_constraints(dh_d)
+ch_d = create_phase_field_constraints(dh_d, crack_nodes)
 ```
 """
-function create_phase_field_constraints(dh_d)
+function create_phase_field_constraints(dh_d, crack_nodes)
     ch_d = Ferrite.ConstraintHandler(dh_d)
-    # 即使没有约束，也需要 `close!` 和 `update!` 形成可供装配器使用的完整对象。
+    if !isempty(crack_nodes)
+        Ferrite.add!(ch_d, Ferrite.Dirichlet(:d, collect(crack_nodes), (x, t) -> 1.0))
+    end
     Ferrite.close!(ch_d)
     Ferrite.update!(ch_d, 0.0)
     return ch_d
@@ -223,7 +226,7 @@ function initial_crack_nodes(
 end
 
 """
-    setup_square_tension(; cells = (50, 50), top_displacement = 0.0,
+    setup_square_tension(; cells = (50, 50), final_displacement = 0.0,
                            crack_y = 0.0, crack_x_min = -1.0,
                            crack_x_max = 0.0, crack_half_width = 1e-10)
 
@@ -240,7 +243,7 @@ using PhaseFieldFracture
 
 setup = setup_square_tension(
     cells = (50, 50),
-    top_displacement = 0.01,
+    final_displacement = 0.01,
     crack_y = 0.0,
     crack_x_min = -1.0,
     crack_x_max = 0.0,
@@ -254,14 +257,14 @@ crack_nodes = setup.crack_nodes
 
 # 参数说明
 - `cells`：x、y 方向的单元数量。
-- `top_displacement`：顶边竖向位移加载幅值。
+- `final_displacement`：顶边竖向位移加载幅值。
 - `crack_y`：预制裂纹所在的 y 坐标。
 - `crack_x_min` / `crack_x_max`：预制裂纹在线段方向上的 x 坐标范围。
 - `crack_half_width`：筛选裂纹节点时使用的半宽容差。
 """
 function setup_square_tension(;
     cells::NTuple{2,Int} = (100, 100),
-    top_displacement = 0.0,
+    final_displacement = 0.0,
     crack_y = 0.0,
     crack_x_min = -1.0,
     crack_x_max = 0.0,
@@ -272,10 +275,8 @@ function setup_square_tension(;
     # 2. 分别为位移场 u 和相场 d 建立自由度编号，适配交错求解流程。
     dh_u, dh_d = create_staggered_dofhandlers(grid)
     # 3. 设置力学边界条件：底边固定，顶边施加竖向位移加载。
-    ch_u = create_displacement_constraints(dh_u, grid; top_displacement)
-    # 4. 创建相场约束处理器；当前无显式相场边界约束。
-    ch_d = create_phase_field_constraints(dh_d)
-    # 5. 根据几何坐标筛选预制裂纹节点，供初始损伤场使用。
+    ch_u = create_displacement_constraints(dh_u, grid; final_displacement)
+    # 4. 根据几何坐标筛选预制裂纹节点，供初始损伤场使用。
     crack_nodes = initial_crack_nodes(
         grid;
         y = crack_y,
@@ -283,7 +284,9 @@ function setup_square_tension(;
         x_max = crack_x_max,
         half_width = crack_half_width,
     )
+    # 5. 创建相场约束处理器，在裂纹节点上固定 d = 1。
+    ch_d = create_phase_field_constraints(dh_d, crack_nodes)
 
     # 统一封装初始化结果，减少求解脚本需要手动传递的对象数量。
-    return SquareTensionSetup(; grid, dh_u, dh_d, ch_u, ch_d, crack_nodes)
+    return SquareTensionSetup(; grid, dh_u, dh_d, ch_u, ch_d, crack_nodes, final_displacement)
 end

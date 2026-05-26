@@ -6,7 +6,7 @@ using Ferrite
 
 setup = setup_square_tension(
     cells = (100, 100),
-    top_displacement = 0.01, # 总拉伸 0.01 mm
+    final_displacement = 0.01, # 总拉伸 0.01 mm
     crack_y = 0.0,           # 裂纹高度在正中间 y = 0.0
     crack_x_min = -1.0,       # 裂纹从左边界 x = -1.0 开始
     crack_x_max = 0.0        # 一直切到中心 x = 0.0
@@ -30,6 +30,22 @@ mat = PhaseFieldMaterial(
     k_tol = 1e-8
 )
 
-disp, force = solve_staggered(setup, mat; n_steps = 100, max_u_disp = 0.01, max_iter = 500)
+disp, force = solve_staggered(setup, mat; n_steps = 100, max_iter = 1000)
 
-println("大功告成！你可以用 ParaView 打开 data/sims/ 下的 .vtu 文件看裂纹扩展了！")
+# 可视化载荷-位移曲线
+using CairoMakie
+
+fig = Figure(size = (600, 400))
+ax = Axis(fig[1, 1],
+    xlabel = "Displacement (mm)",
+    ylabel = "Reaction Force (N)",
+    title = "Square Tension — Load‑Displacement Curve",
+)
+
+lines!(ax, disp, force; linewidth = 2, color = :steelblue)
+
+mkpath("data/plots")
+save("data/plots/load_displacement.png", fig)
+
+println("大功告成！载荷-位移曲线已保存至 data/plots/load_displacement.png。")
+println("你也可以用 ParaView 打开 data/sims/ 下的 .vtu 文件看裂纹扩展了！")

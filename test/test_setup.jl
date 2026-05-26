@@ -1,7 +1,7 @@
 import Ferrite
 
 @testset "square tension setup" begin
-    setup = setup_square_tension(cells = (2, 2), top_displacement = 0.01)
+    setup = setup_square_tension(cells = (2, 2), final_displacement = 0.01)
 
     @test Ferrite.getncells(setup.grid) == 4
     @test Ferrite.ndofs(setup.dh_u) == 18
