@@ -71,13 +71,19 @@ function solve_staggered(
     R_u = zeros(ndofs_u)
     F_d = zeros(ndofs_d)
     
-    # 记录反力-位移曲线用的数组
+    # 记录反力-位移曲线和能量演化用的数组
     reaction_forces = Float64[0]
     displacements = Float64[0]
+    elastic_energies = Float64[0]
+    surface_energies = Float64[0]
     
     # 建立 VTK 输出文件夹
     mkpath("data/sims")
-    
+
+    # 计时和迭代计数
+    t_start = time()
+    total_newton_iters = 0
+
     # --- 3. 开启增量载荷步循环 ---
     println("开始 Staggered 交错求解，总步数: $n_steps")
     for step in 1:n_steps
@@ -123,6 +129,7 @@ function solve_staggered(
                 u_residual_norm = norm(R_u)
                 newton_iter += 1
             end
+            total_newton_iters += newton_iter
             
             # ==========================================
             # 步骤 B: 更新不可逆历史变量 H
@@ -162,7 +169,11 @@ function solve_staggered(
         # 确认收敛，更新保存上一载荷步的变量
         u_prev .= u_n
         d_prev .= d_n
-        
+
+        # 计算当前步的弹性体能量和断裂表面能
+        push!(elastic_energies, elastic_energy(dh_u, dh_d, u_n, d_n, mat, cv_u, cv_d))
+        push!(surface_energies, surface_energy(dh_d, d_n, mat, cv_d))
+
         # ==========================================
         # 步骤 E: 计算反力与输出 VTK
         # ==========================================
@@ -186,5 +197,7 @@ function solve_staggered(
     end # 外层载荷增量循环结束
     
     println("仿真结束！VTK 文件保存在 data/sims/ 目录下。")
-    return displacements, reaction_forces
+    println("总Newton迭代次数: $total_newton_iters")
+    println("计算耗时: $(round(time() - t_start, digits=2)) 秒")
+    return displacements, reaction_forces, elastic_energies, surface_energies
 end

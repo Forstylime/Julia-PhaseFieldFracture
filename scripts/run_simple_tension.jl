@@ -36,29 +36,52 @@ mat = PhaseFieldMaterial(
     k_tol = 1e-8
 )
 
-disp, force = solve_staggered(setup, mat; n_steps = 100, max_iter = 1000)
+disp, force, psi_energy, gf_energy = solve_staggered(setup, mat; n_steps = 100, max_iter = 1000)
 
-# 可视化载荷-位移曲线
+# 可视化载荷-位移曲线 and 能量演变
 using CairoMakie
 
 disp_plot = -disp
 force_plot = -force
 
-fig = Figure(size = (600, 400))
-ax = Axis(fig[1, 1],
+# 找到峰值载荷及其对应位移
+peak_idx = argmax(force_plot)
+peak_force = force_plot[peak_idx]
+peak_disp = disp_plot[peak_idx]
+println("峰值载荷: F_max = $(round(peak_force, digits=3)) N @ ū = $(round(peak_disp, digits=4)) mm")
+
+mkpath("data/plots")
+
+# 图一：载荷-位移曲线
+fig_load = Figure(size = (600, 400))
+ax_load = Axis(fig_load[1, 1],
     xlabel = L"\bar{u}~\mathrm{[mm]}",
     ylabel = L"F_{\mathrm{reaction}}~\mathrm{[N]}",
+    title = "Load‑Displacement",
     limits = ((0, maximum(disp_plot)), (0, nothing)),
     xgridvisible = true,
     ygridvisible = true,
     xgridcolor = :lightgray,
     ygridcolor = :lightgray,
 )
+lines!(ax_load, disp_plot, force_plot; linewidth = 2, color = :red, linestyle = :dash, label = "Staggered")
+save("data/plots/load_displacement.png", fig_load)
 
-lines!(ax, disp_plot, force_plot; linewidth = 2, color = :red, linestyle = :dash, label = "Staggered")
+# 图二：能量演变
+fig_energy = Figure(size = (600, 400))
+ax_energy = Axis(fig_energy[1, 1],
+    xlabel = L"\bar{u}~\mathrm{[mm]}",
+    ylabel = "Energy [N·mm]",
+    title = "Energy Evolution",
+    xgridvisible = true,
+    ygridvisible = true,
+    xgridcolor = :lightgray,
+    ygridcolor = :lightgray,
+)
+lines!(ax_energy, disp_plot, psi_energy; linewidth = 2, color = :steelblue, label = L"\Psi\ \mathrm{(elastic)}")
+lines!(ax_energy, disp_plot, gf_energy; linewidth = 2, color = :darkorange, label = L"\mathcal{G}_f\ \mathrm{(surface)}")
+axislegend(ax_energy; position = :lt)
+save("data/plots/energy_evolution.png", fig_energy)
 
-mkpath("data/plots")
-save("data/plots/load_displacement.png", fig)
-
-println("大功告成！载荷-位移曲线已保存至 data/plots/load_displacement.png。")
-println("你也可以用 ParaView 打开 data/sims/ 下的 .vtu 文件看裂纹扩展了！")
+println("载荷-位移曲线已保存至 data/plots/load_displacement.png。")
+println("能量演变曲线已保存至 data/plots/energy_evolution.png。")
