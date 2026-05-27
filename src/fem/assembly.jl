@@ -157,3 +157,36 @@ function assemble_d!(
         assemble!(assembler, celldofs(cell), Ke, Fe)
     end
 end
+
+"""
+    assemble_mass_matrix_d!(M, dh_d, cv_d)
+
+组装相场 d 的全局一致质量矩阵 M_ij = ∫_Ω N_i·N_j dΩ。
+该矩阵与材料参数和状态变量无关，网格拓扑不变时为常数矩阵，
+只需在求解器初始化时组装一次。
+"""
+function assemble_mass_matrix_d!(
+    M::SparseMatrixCSC, dh_d::DofHandler, cv_d::CellValues,
+)
+    assembler = start_assemble(M)
+    n_basefuncs_d = getnbasefunctions(cv_d)
+    Me = zeros(n_basefuncs_d, n_basefuncs_d)
+
+    for cell in CellIterator(dh_d)
+        reinit!(cv_d, cell)
+        fill!(Me, 0.0)
+
+        for q_point in 1:getnquadpoints(cv_d)
+            dΩ = getdetJdV(cv_d, q_point)
+
+            for i in 1:n_basefuncs_d
+                N_i = shape_value(cv_d, q_point, i)
+                for j in 1:n_basefuncs_d
+                    N_j = shape_value(cv_d, q_point, j)
+                    Me[i, j] += N_i * N_j * dΩ
+                end
+            end
+        end
+        assemble!(assembler, celldofs(cell), Me)
+    end
+end

@@ -10,14 +10,14 @@ using LinearAlgebra
 论文采用 Lamé 常数 λ 和 μ，以及断裂能 gc 和尺度参数 l。
 """
 Base.@kwdef struct PhaseFieldMaterial
-    E::Float64        = 210e3   # 杨氏模量 (MPa)
-    ν::Float64        = 0.3     # 泊松比
-    # Lamé 常数 (假设平面应变，若是平面应力后续可在计算能量时修正)
-    λ::Float64        = (E * ν) / ((1 + ν) * (1 - 2ν))
+    E::Float64        = 25840   # 杨氏模量 (MPa)
+    ν::Float64        = 0.18    # 泊松比
+    # Lamé 常数 (根据论文，采用平面应力，而不是平面应变公式)
+    λ::Float64        = (E * ν) / (1 - ν^2) # (E * ν) / ((1 + ν) * (1 - 2ν))
     μ::Float64        = E / (2 * (1 + ν))
     # 相场断裂参数
-    gc::Float64       = 2.7     # 临界断裂能 (N/mm)
-    l::Float64        = 0.01    # 长度尺度参数 (mm)
+    gc::Float64       = 0.65    # 临界断裂能 (N/mm)
+    l::Float64        = 10      # 长度尺度参数 (mm)
     k_tol::Float64    = 1e-8    # 残余刚度参数 k0 (防止 d=1 时刚度矩阵奇异)
 end
 

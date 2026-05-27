@@ -15,8 +15,11 @@ include("physics/energies.jl")
 include("fem/setup.jl")
 include("fem/assembly.jl")
 
+include("utils/meshes.jl")
+
 # solvers
 include("solvers/staggered.jl")
+include("solvers/sem_solver.jl")
 
 export
     PhaseFieldMaterial,
@@ -24,7 +27,7 @@ export
     tensile_energy_density,
     refine_range,
     refine_grid!,
-    SquareTensionSetup,
+    TensionSetup,
     make_square_tension_grid,
     create_l_shape_grid,
     create_staggered_dofhandlers,
@@ -39,5 +42,7 @@ export
     elastic_energy,
     surface_energy,
     total_energy,
-    solve_staggered
+    solve_staggered,
+    solve_sem,
+    assemble_mass_matrix_d!
 end

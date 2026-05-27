@@ -1,12 +1,12 @@
 """
-    SquareTensionSetup
+    TensionSetup
 
 保存方形拉伸相场断裂算例的有限元初始化结果。也可以用于其他几何相似的算例（如 L 形拉伸），只要保证网格和边界条件设置与求解器要求一致。
 
 该结构体把后续求解器需要反复使用的对象集中在一起：计算网格、位移场和
 相场的自由度处理器、两类场的约束处理器，以及用于设置预制裂纹的节点编号。
 """
-Base.@kwdef struct SquareTensionSetup{G,DHU,DHD,CHU,CHD,N}
+Base.@kwdef struct TensionSetup{G,DHU,DHD,CHU,CHD,N}
     grid::G
     dh_u::DHU
     dh_d::DHD
@@ -253,7 +253,7 @@ end
 # 脚本功能
 本文件提供方形拉伸问题的前处理工具：生成网格、建立位移场/相场自由度、
 设置拉伸边界条件、定位预制裂纹节点，并把这些对象封装到
-`SquareTensionSetup` 中。求解脚本可以直接使用返回对象进入装配和求解阶段。
+`TensionSetup` 中。求解脚本可以直接使用返回对象进入装配和求解阶段。
 
 # 使用方法
 ```julia
@@ -306,7 +306,7 @@ function setup_square_tension(;
     ch_d = create_phase_field_constraints(dh_d, crack_nodes)
 
     # 统一封装初始化结果，减少求解脚本需要手动传递的对象数量。
-    return SquareTensionSetup(; grid, dh_u, dh_d, ch_u, ch_d, crack_nodes, final_displacement)
+    return TensionSetup(; grid, dh_u, dh_d, ch_u, ch_d, crack_nodes, final_displacement)
 end
 
 """
@@ -328,5 +328,5 @@ function setup_l_tension(;
     ch_d = create_phase_field_constraints(dh_d, Int[]) # L 形算例通常不需要预置裂纹，传入空节点列表。
 
     # 统一封装初始化结果，减少求解脚本需要手动传递的对象数量。
-    return SquareTensionSetup(; grid, dh_u, dh_d, ch_u, ch_d, crack_nodes = Int[], final_displacement)
+    return TensionSetup(; grid, dh_u, dh_d, ch_u, ch_d, crack_nodes = Int[], final_displacement)
 end

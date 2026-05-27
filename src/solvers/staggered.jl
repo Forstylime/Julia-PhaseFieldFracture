@@ -5,7 +5,7 @@ using LinearAlgebra
 using SparseArrays
 
 """
-    solve_staggered(setup::SquareTensionSetup, mat::PhaseFieldMaterial;
+    solve_staggered(setup::TensionSetup, mat::PhaseFieldMaterial;
                     n_steps = 100, tol = 1e-4)
 
 执行标准交错求解法 (Staggered Scheme)。
@@ -13,9 +13,9 @@ using SparseArrays
 位移加载幅值从 setup.final_displacement 读取。
 """
 function solve_staggered(
-    setup::SquareTensionSetup, mat::PhaseFieldMaterial;
+    setup::TensionSetup, mat::PhaseFieldMaterial;
     n_steps = 100,          # 总载荷步数 (论文设为 100 步)
-    tol = 1e-4,             # Newton 迭代和交错循环的收敛容差
+    tol = 1e-6,             # Newton 迭代和交错循环的收敛容差
     max_iter = 20           # 内层交错循环的最大允许次数
 )
     # --- 1. 提取网格与自由度 ---

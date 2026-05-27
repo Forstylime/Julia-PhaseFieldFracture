@@ -3,7 +3,7 @@ using Ferrite
 using FerriteGmsh
 
 # 快速示例：从项目根目录运行
-#   julia --project=. scripts/run_simple_tension.jl
+#   julia --project=. scripts/run_standard_staggered.jl
 """
 setup = setup_square_tension(
     cells = (100, 100),
@@ -23,7 +23,7 @@ mkpath("data/mesh")
 let dh = DofHandler(setup.grid)
     add!(dh, :u, Lagrange{RefQuadrilateral,1}())
     close!(dh)
-    VTKGridFile("data/mesh/my_mesh", dh) do vtk
+    VTKGridFile("data/mesh/l_shape_mesh", dh) do vtk
         # 空闭包 — 只导出网格，不写解字段
     end
 end
@@ -36,7 +36,7 @@ mat = PhaseFieldMaterial(
     k_tol = 1e-8
 )
 
-disp, force, psi_energy, gf_energy = solve_staggered(setup, mat; n_steps = 100, max_iter = 1000)
+disp, force, psi_energy, gf_energy = solve_staggered(setup, mat; n_steps = 100, max_iter = 5000)
 
 # 可视化载荷-位移曲线 and 能量演变
 using CairoMakie
@@ -48,7 +48,7 @@ force_plot = -force
 peak_idx = argmax(force_plot)
 peak_force = force_plot[peak_idx]
 peak_disp = disp_plot[peak_idx]
-println("峰值载荷: F_max = $(round(peak_force, digits=3)) N @ ū = $(round(peak_disp, digits=4)) mm")
+println("峰值载荷: F_max = $(round(peak_force, digits=4)) N @ ū = $(round(peak_disp, digits=4)) mm")
 
 mkpath("data/plots")
 
