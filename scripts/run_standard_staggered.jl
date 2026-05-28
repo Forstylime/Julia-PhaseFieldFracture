@@ -64,7 +64,7 @@ ax_load = Axis(fig_load[1, 1],
     xgridcolor = :lightgray,
     ygridcolor = :lightgray,
 )
-lines!(ax_load, disp_plot, force_plot; linewidth = 2, color = :red, linestyle = :dash, label = "Staggered")
+lines!(ax_load, disp_plot, force_plot; linewidth = 2, color = :red, linestyle = :dash) # 红色虚线
 save("data/plots/load_displacement.png", fig_load)
 
 # 图二：能量演变
@@ -73,6 +73,7 @@ ax_energy = Axis(fig_energy[1, 1],
     xlabel = L"\bar{u}~\mathrm{[mm]}",
     ylabel = "Energy [N·mm]",
     title = "Energy Evolution",
+    limits = ((0, maximum(disp_plot)), (0, nothing)),
     xgridvisible = true,
     ygridvisible = true,
     xgridcolor = :lightgray,
@@ -85,3 +86,8 @@ save("data/plots/energy_evolution.png", fig_energy)
 
 println("载荷-位移曲线已保存至 data/plots/load_displacement.png。")
 println("能量演变曲线已保存至 data/plots/energy_evolution.png。")
+
+# 保存数据以供后续分析
+using JLD2
+@save "data/jld2/staggered_results.jld2" disp force psi_energy gf_energy
+println("Staggered 仿真数据已保存至 data/jld2/staggered_results.jld2。")

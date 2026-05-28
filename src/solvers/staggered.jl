@@ -188,7 +188,7 @@ function solve_staggered(
         
         # 每隔 5 步输出一次 VTK 以节约硬盘
         if step % 5 == 0 || step == n_steps
-            VTKGridFile("data/sims/fracture_step_$step", dh_u) do vtk
+            VTKGridFile("data/sims/staggered/fracture_step_$step", dh_u) do vtk
                 write_solution(vtk, dh_u, u_n)
                 write_solution(vtk, dh_d, d_n)
             end
@@ -196,7 +196,7 @@ function solve_staggered(
         
     end # 外层载荷增量循环结束
     
-    println("仿真结束！VTK 文件保存在 data/sims/ 目录下。")
+    println("仿真结束！VTK 文件保存在 data/sims/staggered 目录下。")
     println("总Newton迭代次数: $total_newton_iters")
     println("计算耗时: $(round(time() - t_start, digits=2)) 秒")
     return displacements, reaction_forces, elastic_energies, surface_energies

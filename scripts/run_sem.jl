@@ -21,14 +21,13 @@ mat = PhaseFieldMaterial(
 
 t_vals, disp, force, psi_energy, gf_energy = solve_sem(
     setup, mat;
-    n_steps = 500,
     ρ = 0.8658,
-    α_init = 10.0,
+    α_init = 9.0,
     β = 1.2,
     tol_staggered = 1e-5,
-    tol_al = 1e-6,
+    tol_kkt = 1e-6,
     max_staggered_iter = 300,
-    max_al_iter = 200,
+    max_kkt_iter = 200,
     max_newton_iter = 10,
     t_max = 86.58,
     output_freq = 5,
@@ -57,7 +56,7 @@ ax_load = Axis(fig_load[1, 1],
     xgridcolor = :lightgray,
     ygridcolor = :lightgray,
 )
-lines!(ax_load, disp_plot, force_plot; linewidth = 2, color = :red)
+lines!(ax_load, disp_plot, force_plot; linewidth = 2, color = :red, linestyle = :dot) # 红色点线
 save("data/plots/load_displacement_sem.png", fig_load)
 
 # 图二：能量演变
@@ -66,6 +65,7 @@ ax_energy = Axis(fig_energy[1, 1],
     xlabel = L"\bar{u}~\mathrm{[mm]}",
     ylabel = "Energy [N·mm]",
     title = "Energy Evolution (S-EM)",
+    limits = ((0, maximum(disp_plot)), (0, nothing)),
     xgridvisible = true,
     ygridvisible = true,
     xgridcolor = :lightgray,
@@ -78,3 +78,8 @@ save("data/plots/energy_evolution_sem.png", fig_energy)
 
 println("载荷-位移曲线已保存至 data/plots/load_displacement_sem.png。")
 println("能量演变曲线已保存至 data/plots/energy_evolution_sem.png。")
+
+# 保存数据以供后续分析
+using JLD2
+@save "data/jld2/sem_results.jld2" t_vals disp force psi_energy gf_energy
+println("S-EM 仿真数据已保存至 data/jld2/sem_results.jld2。")

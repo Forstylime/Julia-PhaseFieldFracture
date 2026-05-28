@@ -19,7 +19,10 @@ include("utils/meshes.jl")
 
 # solvers
 include("solvers/staggered.jl")
-include("solvers/sem_solver.jl")
+include("solvers/sem.jl")
+
+# utilities
+include("utils/utils_fun.jl")
 
 export
     PhaseFieldMaterial,
@@ -44,5 +47,6 @@ export
     total_energy,
     solve_staggered,
     solve_sem,
-    assemble_mass_matrix_d!
+    assemble_mass_matrix_d!,
+    compute_g
 end
