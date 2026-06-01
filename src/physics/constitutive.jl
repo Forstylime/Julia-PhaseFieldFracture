@@ -40,6 +40,12 @@ function strain_spectral_split(ε::SymmetricTensor{2, 2, T}) where T
     # 对对称张量求特征值和特征向量
     # 注意：因为 ForwardDiff 传进来的类型 T 可能是 Dual 数，
     # 这里我们保证类型泛型 T，以支持自动微分穿透！
+
+    # 如果应变几乎为 0，直接返回零张量，避免特征值重根引发的 AD 求导 NaN
+    if norm(ε) < 1e-14
+        return zero(ε), zero(ε)
+    end
+    
     eig = eigen(ε)
     λ1, λ2 = eig.values
     v1, v2 = eig.vectors[:, 1], eig.vectors[:, 2]
@@ -69,7 +75,7 @@ function elastic_energy_density(ε::SymmetricTensor{2,2,T}, d::Real, mat::PhaseF
     # tr(ε) 也就是应变张量的迹
     tr_ε = tr(ε)
     
-    Ψ0_plus = (mat.λ / 2) * macauley_plus(tr_ε)^2 + mat.μ * tr(ε_plus ⋅ ε_plus)
+    Ψ0_plus = (mat.λ / 2) * macauley_plus(tr_ε)^2 + mat.μ * tr(ε_plus ⋅ ε_plus) # 也可以写 mat.μ * (ε_plus ⊡ ε_plus)
     Ψ0_minus = (mat.λ / 2) * macauley_minus(tr_ε)^2 + mat.μ * tr(ε_minus ⋅ ε_minus)
     
     # 3. 引入相场退化函数 g(d) = (1-d)^2 + k0

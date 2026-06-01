@@ -2,7 +2,7 @@
 
 julia_version = "1.12.5"
 manifest_format = "2.0"
-project_hash = "26e0b700d94c7135356e43bb3ee5d9daa9e7ebd4"
+project_hash = "9727b3a5463f3a9b6cad1d9477d9f96d23938638"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -1234,7 +1234,7 @@ uuid = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
 version = "2.8.4"
 
 [[deps.PhaseFieldFracture]]
-deps = ["BlockArrays", "CairoMakie", "DrWatson", "Ferrite", "FerriteGmsh", "FerriteMeshParser", "ForwardDiff", "LinearAlgebra", "SparseArrays", "Tensors", "TimerOutputs", "WriteVTK"]
+deps = ["BlockArrays", "CairoMakie", "DrWatson", "Ferrite", "FerriteGmsh", "FerriteMeshParser", "ForwardDiff", "LinearAlgebra", "Serialization", "SparseArrays", "Tensors", "TimerOutputs", "WriteVTK"]
 path = "."
 uuid = "1b8d234a-9c42-4f3b-8d1e-7a2c9b4e6d8f"
 version = "0.1.0"

@@ -330,3 +330,89 @@ function setup_l_tension(;
     # 统一封装初始化结果，减少求解脚本需要手动传递的对象数量。
     return TensionSetup(; grid, dh_u, dh_d, ch_u, ch_d, crack_nodes = Int[], final_displacement)
 end
+
+
+
+"""
+    MonolithicTensionSetup
+
+保存算例的有限元初始化结果（整体式版本）。
+只保留一个统一的 DofHandler 和 ConstraintHandler。
+"""
+Base.@kwdef struct MonolithicTensionSetup{G,DH,CH,N}
+    grid::G
+    dh::DH
+    ch::CH
+    crack_nodes::N
+    final_displacement::Float64
+end
+
+"""
+    create_monolithic_dofhandler(grid)
+
+为整体式求解格式创建一个包含位移场(:u)和相场(:d)的统一自由度处理器。
+"""
+function create_monolithic_dofhandler(grid)
+    dh = Ferrite.DofHandler(grid)
+    
+    # 位移场：2维向量
+    ip_u = Ferrite.Lagrange{Ferrite.RefQuadrilateral, 1}()^2
+    Ferrite.add!(dh, :u, ip_u)
+    
+    # 相场：标量
+    ip_d = Ferrite.Lagrange{Ferrite.RefQuadrilateral, 1}()
+    Ferrite.add!(dh, :d, ip_d)
+    
+    Ferrite.close!(dh)
+
+    println("总自由度数量 (u + d): ", Ferrite.ndofs(dh))
+    return dh
+end
+
+"""
+    create_monolithic_constraints(dh, grid, crack_nodes; final_displacement = 0.0)
+
+为整体式 DofHandler 创建统一的边界条件（包含 u 和 d）。
+"""
+function create_monolithic_constraints(dh, grid, crack_nodes; final_displacement = 0.0)
+    ch = Ferrite.ConstraintHandler(dh)
+
+    top = Ferrite.getfacetset(grid, "top")
+    right = Ferrite.getfacetset(grid, "right")
+
+    # ---- 位移 u 约束 ----
+    # 顶边 ux、uy 全固定
+    Ferrite.add!(ch, Ferrite.Dirichlet(:u, top, (x, t) -> zeros(2), [1, 2]))
+    # 右侧施加竖向位移加载
+    Ferrite.add!(ch, Ferrite.Dirichlet(:u, right, (x, t) -> t * final_displacement, 2))
+
+    # ---- 相场 d 约束 ----
+    if !isempty(crack_nodes)
+        Ferrite.add!(ch, Ferrite.Dirichlet(:d, Set(crack_nodes), (x, t) -> 1.0))
+    end
+
+    Ferrite.close!(ch)
+    Ferrite.update!(ch, 0.0)
+    return ch
+end
+
+"""
+    setup_l_tension_monolithic(...)
+
+一站式初始化函数（整体式版本示例）。
+"""
+function setup_l_tension_monolithic(;
+    msh_file = "data/mesh/l_shape.msh",
+    final_displacement = 0.0,
+)
+    grid = create_l_shape_grid(msh_file)
+    crack_nodes = Int[] # L形通常不需要预制裂纹
+    
+    # 1. 创建整体式 DofHandler
+    dh = create_monolithic_dofhandler(grid)
+    
+    # 2. 创建整体式 ConstraintHandler
+    ch = create_monolithic_constraints(dh, grid, crack_nodes; final_displacement)
+    
+    return MonolithicTensionSetup(; grid, dh, ch, crack_nodes, final_displacement)
+end
