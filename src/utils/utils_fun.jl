@@ -13,36 +13,30 @@ function compute_g(d::Vector{Float64}, d_prev::Vector{Float64}, M_d::SparseMatri
 end
 
 """
-专为 Monolithic 设计的历史变量更新函数
+    update_history!(H, dh_u, u_global, mat, cv_u)
+
+根据当前的位移场，更新每个积分点上的相场不可逆历史变量 H。
+对应论文公式 (18)。
 """
-function update_history_mono!(
-    H::Vector{Float64}, dh::DofHandler, x_global::Vector{Float64}, 
+function update_history!(
+    H::Vector{Float64}, 
+    dh_u::DofHandler, u_global::Vector{Float64}, 
     mat::PhaseFieldMaterial, cv_u::CellValues
 )
-    qp_count = 1
-    u_range = dof_range(dh, :u)
-    for cell in CellIterator(dh)
+    qp_count = 1 # 全局积分点计数器
+    for cell in CellIterator(dh_u)
         reinit!(cv_u, cell)
-        u_loc = x_global[celldofs(cell)][u_range]
+        u_loc = u_global[celldofs(cell)]
         for q_point in 1:getnquadpoints(cv_u)
             ε_q = function_symmetric_gradient(cv_u, q_point, u_loc)
+            
+            # 仅计算拉伸能量部分
             ψ_plus = tensile_energy_density(ε_q, mat)
+            
+            # 历史变量是递增的 (不可逆性)
             H[qp_count] = max(H[qp_count], ψ_plus)
+            
             qp_count += 1
         end
-    end
-end
-
-"""
-    adapt_rho!(ρ, success)
-
-Crisfield 弧长半径自适应。
-连续收敛失败时减半 ρ；每次成功后逐步恢复（×1.1，上限为初始值）。
-"""
-function adapt_rho!(ρ::Float64, ρ_init::Float64, success::Bool)
-    if success
-        return min(ρ * 1.2, ρ_init)
-    else
-        return ρ * 0.5
     end
 end
