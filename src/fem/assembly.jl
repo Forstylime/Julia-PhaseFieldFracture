@@ -12,20 +12,20 @@ using SparseArrays
 这是非线性牛顿迭代的核心步骤。
 """
 function assemble_u!(
-    K::SparseMatrixCSC, R::Vector{Float64}, 
+    K::AbstractMatrix{T}, R::AbstractVector{T}, # 允许 T 类型 (Float64 或 Dual)
     dh_u::DofHandler, dh_d::DofHandler,
-    u_global::Vector{Float64}, d_global::Vector{Float64}, 
+    u_global::AbstractVector{T}, d_global::AbstractVector, # 位移设为 T
     mat::PhaseFieldMaterial, 
     cv_u::CellValues, cv_d::CellValues
-)
+) where T <: Real # 使用参数化类型 T
     # 初始化汇编器，自动把单元矩阵加到全局稀疏矩阵的对应位置
     assembler = start_assemble(K, R)
     
     n_basefuncs_u = getnbasefunctions(cv_u)
     
     # 获取每个单元的局部矩阵和向量缓存
-    Ke = zeros(n_basefuncs_u, n_basefuncs_u)
-    Re = zeros(n_basefuncs_u)
+    Ke = zeros(T, n_basefuncs_u, n_basefuncs_u)
+    Re = zeros(T, n_basefuncs_u)
     
     # 遍历每一个网格单元 (同时遍历 u 和 d 的自由度布局)
     for (cell_u, cell_d) in zip(CellIterator(dh_u), CellIterator(dh_d))
@@ -73,35 +73,6 @@ function assemble_u!(
         end
         # 将单元矩阵推入全局矩阵
         assemble!(assembler, celldofs(cell_u), Ke, Re)
-    end
-end
-
-"""
-    update_history!(H, dh_u, u_global, mat, cv_u)
-
-根据当前的位移场，更新每个积分点上的相场不可逆历史变量 H。
-对应论文公式 (18)。
-"""
-function update_history!(
-    H::Vector{Float64}, 
-    dh_u::DofHandler, u_global::Vector{Float64}, 
-    mat::PhaseFieldMaterial, cv_u::CellValues
-)
-    qp_count = 1 # 全局积分点计数器
-    for cell in CellIterator(dh_u)
-        reinit!(cv_u, cell)
-        u_loc = u_global[celldofs(cell)]
-        for q_point in 1:getnquadpoints(cv_u)
-            ε_q = function_symmetric_gradient(cv_u, q_point, u_loc)
-            
-            # 仅计算拉伸能量部分
-            ψ_plus = tensile_energy_density(ε_q, mat)
-            
-            # 历史变量是递增的 (不可逆性)
-            H[qp_count] = max(H[qp_count], ψ_plus)
-            
-            qp_count += 1
-        end
     end
 end
 
@@ -196,30 +167,30 @@ end
 使用统一的 DofHandler 组装整体刚度矩阵 K_aa 和残差 r_a。
 这就是论文 Eq. 23 和 Eq. 24 中的 K_aa 和 f_int。
 
-⚠️ 修正版：删除应力中的谱分解 (MCR)，与 staggered 的 assemble_u! 保持物
-理一致。MCR 效应仅保留在历史变量 H 中（通过 tensile_energy_density）,
-r_d 和 K_du 中的 ∂r_d/∂u 仍使用谱分解拉伸应力 σ₀⁺, 与 assemble_d! 一致。
+⚠️ 注意：当前没有谱分解 (MCR)，与 staggered 的 assemble_u! 保持物理一致。
 """
 function assemble_monolithic!(
-    K_aa::SparseMatrixCSC, r_a::Vector{Float64},
-    dh::DofHandler, x_global::Vector{Float64},
-    H_old::Vector{Float64},
+    K_aa::Union{AbstractMatrix{T}, Nothing}, r_a::AbstractVector{T},
+    dh::DofHandler, x_global::AbstractVector{T},
+    H_old::AbstractVector,
     mat::PhaseFieldMaterial,
     cv_u::CellValues, cv_d::CellValues
-)
-    assembler = start_assemble(K_aa, r_a)
+) where T <: Real
+
+    # 仅在需要装配刚度矩阵时初始化装配器
+    assembler = K_aa !== nothing ? start_assemble(K_aa, r_a) : nothing
 
     # 获取 u 和 d 在单元矩阵中的索引范围
     u_range = Ferrite.dof_range(dh, :u)
     d_range = Ferrite.dof_range(dh, :d)
 
     n_dofs = ndofs_per_cell(dh)
-    Ke = zeros(n_dofs, n_dofs)
-    Re = zeros(n_dofs)
+    Ke = zeros(T, n_dofs, n_dofs)
+    Re = zeros(T, n_dofs)
 
-    # 四阶各向同性弹性张量 ℂ₀ (常数, 与状态无关)
-    I2 = one(SymmetricTensor{2, 2, Float64})
-    I4 = one(SymmetricTensor{4, 2, Float64})
+    # 四阶各向同性弹性张量 ℂ₀ (常数)
+    I2 = one(SymmetricTensor{2, 2, T})
+    I4 = one(SymmetricTensor{4, 2, T})
     ℂ₀ = mat.λ * (I2 ⊗ I2) + 2.0 * mat.μ * I4
 
     qp_count = 1
@@ -228,12 +199,15 @@ function assemble_monolithic!(
         reinit!(cv_u, cell)
         reinit!(cv_d, cell)
 
-        x_loc = x_global[celldofs(cell)]
+        c_dofs = celldofs(cell)
+        x_loc = x_global[c_dofs]
         u_loc = x_loc[u_range]
         d_loc = x_loc[d_range]
 
-        fill!(Ke, 0.0)
-        fill!(Re, 0.0)
+        fill!(Re, zero(T))
+        if K_aa !== nothing
+            fill!(Ke, zero(T))
+        end
 
         for q_point in 1:getnquadpoints(cv_u)
             dΩ = getdetJdV(cv_u, q_point)
@@ -242,37 +216,29 @@ function assemble_monolithic!(
             d_q  = function_value(cv_d, q_point, d_loc)
             ∇d_q = function_gradient(cv_d, q_point, d_loc)
 
-            # ---- 退化函数 (clamp 防止 Newton 迭代中 d>1 导致 g(d) 回升) ----
-            d_q_safe = clamp(d_q, 0.0, 1.0)
-            g_q  = (1.0 - d_q_safe)^2 + mat.k_tol
-            dg_q = -2.0 * (1.0 - d_q_safe)
+            # ---- 退化函数 ----
+            g_q  = (1.0 - d_q)^2 + mat.k_tol
+            dg_q = -2.0 * (1.0 - d_q)
 
-            # ---- 全应力 (无谱分解, 与 assemble_u! 一致) ----
+            # ---- 各向同性无分解应力 ----
             σ₀  = mat.λ * tr(ε_q) * one(ε_q) + 2.0 * mat.μ * ε_q
             σ_real = g_q * σ₀
 
-            # ---- 切线刚度 (与全应力一致) ----
-            ℂ  = g_q * ℂ₀
-
-            # ---- 历史变量 (谱分解仅用于 H, 与 assemble_d! 一致) ----
-            ε_plus, _ = strain_spectral_split(ε_q)
-            tr_eps = tr(ε_q)
-            ψ₀_plus = (mat.λ / 2) * macauley_plus(tr_eps)^2 + mat.μ * (ε_plus ⊡ ε_plus)
-
+            # ---- 历史变量 ----
+            ψ₀ = (mat.λ / 2) * tr(ε_q)^2 + mat.μ * (ε_q ⊡ ε_q)
             H_old_q = H_old[qp_count]
-            is_active = ψ₀_plus > H_old_q
-            H_q = is_active ? ψ₀_plus : H_old_q
+            is_active = ψ₀ > H_old_q
+            H_q = is_active ? ψ₀ : H_old_q
 
             # ---- 相场系数 ----
             coef_d    = mat.gc / mat.l + 2.0 * H_q
             coef_grad = mat.gc * mat.l
 
-            # ---- 拉伸应力 (用于 K_du 耦合, 仅当 active 时需要) ----
-            σ₀_plus = mat.λ * macauley_plus(tr_eps) * one(ε_q) + 2.0 * mat.μ * ε_plus
-
             # ----------------------------------------------------
-            # 填入大单元矩阵 Ke 和 Re
+            # 填入单元残差 Re（及可选的 Ke）
             # ----------------------------------------------------
+            
+            # 1. 位移场部分
             for i in eachindex(u_range)
                 I_u = u_range[i]
                 δε_i = shape_symmetric_gradient(cv_u, q_point, i)
@@ -280,51 +246,63 @@ function assemble_monolithic!(
                 # R_u: 内力残差
                 Re[I_u] += (σ_real ⊡ δε_i) * dΩ
 
-                # K_uu: ∂R_u/∂u
-                for j in eachindex(u_range)
-                    J_u = u_range[j]
-                    Δε_j = shape_symmetric_gradient(cv_u, q_point, j)
-                    Ke[I_u, J_u] += (δε_i ⊡ ℂ ⊡ Δε_j) * dΩ
-                end
+                if K_aa !== nothing
+                    ℂ = g_q * ℂ₀
+                    # K_uu: ∂R_u/∂u
+                    for j in eachindex(u_range)
+                        J_u = u_range[j]
+                        Δε_j = shape_symmetric_gradient(cv_u, q_point, j)
+                        Ke[I_u, J_u] += (δε_i ⊡ ℂ ⊡ Δε_j) * dΩ
+                    end
 
-                # K_ud: ∂R_u/∂d = g'(d) * σ₀ * N_j  (全应力 σ₀, 与 assemble_u! 一致)
-                for j in eachindex(d_range)
-                    J_d = d_range[j]
-                    N_j = shape_value(cv_d, q_point, j)
-                    Ke[I_u, J_d] += dg_q * (σ₀ ⊡ δε_i) * N_j * dΩ
+                    # K_ud: ∂R_u/∂d
+                    for j in eachindex(d_range)
+                        J_d = d_range[j]
+                        N_j = shape_value(cv_d, q_point, j)
+                        Ke[I_u, J_d] += dg_q * (σ₀ ⊡ δε_i) * N_j * dΩ
+                    end
                 end
             end
 
+            # 2. 相场部分
             for i in eachindex(d_range)
                 I_d = d_range[i]
                 δd_i  = shape_value(cv_d, q_point, i)
                 ∇δd_i = shape_gradient(cv_d, q_point, i)
 
-                # R_d: 相场残差 (与 assemble_d! 一致)
+                # R_d: 相场残差
                 Re[I_d] += coef_d * δd_i * d_q * dΩ
                 Re[I_d] += coef_grad * (∇δd_i ⋅ ∇d_q) * dΩ
                 Re[I_d] -= 2.0 * H_q * δd_i * dΩ
 
-                # K_du: ∂R_d/∂u = 2*(d-1)*σ₀_plus * δd_i (仅活跃时, 用拉伸应力 σ₀_plus)
-                if is_active
-                    for j in eachindex(u_range)
-                        J_u = u_range[j]
-                        Δε_j = shape_symmetric_gradient(cv_u, q_point, j)
-                        Ke[I_d, J_u] += 2.0 * (d_q - 1.0) * δd_i * (σ₀_plus ⊡ Δε_j) * dΩ
+                if K_aa !== nothing
+                    # K_du: ∂R_d/∂u
+                    if is_active
+                        for j in eachindex(u_range)
+                            J_u = u_range[j]
+                            Δε_j = shape_symmetric_gradient(cv_u, q_point, j)
+                            Ke[I_d, J_u] += 2.0 * (d_q - 1.0) * δd_i * (σ₀ ⊡ Δε_j) * dΩ
+                        end
                     end
-                end
 
-                # K_dd: ∂R_d/∂d
-                for j in eachindex(d_range)
-                    J_d = d_range[j]
-                    Δd_j  = shape_value(cv_d, q_point, j)
-                    ∇Δd_j = shape_gradient(cv_d, q_point, j)
-                    Ke[I_d, J_d] += (coef_d * δd_i * Δd_j + coef_grad * (∇δd_i ⋅ ∇Δd_j)) * dΩ
+                    # K_dd: ∂R_d/∂d
+                    for j in eachindex(d_range)
+                        J_d = d_range[j]
+                        Δd_j  = shape_value(cv_d, q_point, j)
+                        ∇Δd_j = shape_gradient(cv_d, q_point, j)
+                        Ke[I_d, J_d] += (coef_d * δd_i * Δd_j + coef_grad * (∇δd_i ⋅ ∇Δd_j)) * dΩ
+                    end
                 end
             end
 
             qp_count += 1
         end
-        assemble!(assembler, celldofs(cell), Ke, Re)
+
+        # 区分装配模式
+        if K_aa !== nothing
+            assemble!(assembler, c_dofs, Ke, Re)
+        else
+            r_a[c_dofs] .+= Re  # 绕过装配器，直接原位累加（支持自动微分）
+        end
     end
 end

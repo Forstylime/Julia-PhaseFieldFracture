@@ -353,20 +353,20 @@ end
 为整体式求解格式创建一个包含位移场(:u)和相场(:d)的统一自由度处理器。
 """
 function create_monolithic_dofhandler(grid)
-    dh = Ferrite.DofHandler(grid)
+    dh_a = Ferrite.DofHandler(grid)
     
     # 位移场：2维向量
     ip_u = Ferrite.Lagrange{Ferrite.RefQuadrilateral, 1}()^2
-    Ferrite.add!(dh, :u, ip_u)
+    Ferrite.add!(dh_a, :u, ip_u)
     
     # 相场：标量
     ip_d = Ferrite.Lagrange{Ferrite.RefQuadrilateral, 1}()
-    Ferrite.add!(dh, :d, ip_d)
+    Ferrite.add!(dh_a, :d, ip_d)
     
-    Ferrite.close!(dh)
+    Ferrite.close!(dh_a)
 
-    println("总自由度数量 (u + d): ", Ferrite.ndofs(dh))
-    return dh
+    println("总自由度数量 (u + d): ", Ferrite.ndofs(dh_a))
+    return dh_a
 end
 
 """
