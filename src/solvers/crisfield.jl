@@ -5,41 +5,6 @@ using LinearAlgebra
 using SparseArrays
 
 """
-统一 DofHandler 架构下的边界条件施加函数（处理非齐次/齐次解析）。
-"""
-function apply_arc_length_bc!(K::SparseMatrixCSC{Float64, Int}, f::Vector{Float64}, 
-                              ch::ConstraintHandler, a_bc::Vector{Float64}, apply_zero::Bool)
-    n_dofs = size(K, 1)
-    is_constrained = falses(n_dofs)
-    is_constrained[ch.prescribed_dofs] .= true
-    
-    if !apply_zero
-        # 把非对角项移动到右端项 f
-        f .-= K * a_bc
-        for i in ch.prescribed_dofs
-            f[i] = a_bc[i]
-        end
-    else
-        # 残差方程，边界增量为0
-        for i in ch.prescribed_dofs
-            f[i] = 0.0
-        end
-    end
-    
-    # 极速将约束行列清零，对角线置1
-    for j in 1:size(K, 2)
-        for k in K.colptr[j]:(K.colptr[j+1]-1)
-            i = K.rowval[k]
-            if is_constrained[i] || is_constrained[j]
-                K.nzval[k] = (i == j) ? 1.0 : 0.0
-            end
-        end
-    end
-    
-    return K, f
-end
-
-"""
 Crisfield 弧长法求解器 (Monolithic 架构版)
 输入的是 `MonolithicTensionSetup`
 """

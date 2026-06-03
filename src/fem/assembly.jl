@@ -171,7 +171,7 @@ end
 """
 function assemble_monolithic!(
     K_aa::Union{AbstractMatrix{T}, Nothing}, r_a::AbstractVector{T},
-    dh::DofHandler, x_global::AbstractVector{T},
+    dh_a::DofHandler, x_global::AbstractVector{T},
     H_old::AbstractVector,
     mat::PhaseFieldMaterial,
     cv_u::CellValues, cv_d::CellValues
@@ -181,10 +181,10 @@ function assemble_monolithic!(
     assembler = K_aa !== nothing ? start_assemble(K_aa, r_a) : nothing
 
     # 获取 u 和 d 在单元矩阵中的索引范围
-    u_range = Ferrite.dof_range(dh, :u)
-    d_range = Ferrite.dof_range(dh, :d)
+    u_range = Ferrite.dof_range(dh_a, :u)
+    d_range = Ferrite.dof_range(dh_a, :d)
 
-    n_dofs = ndofs_per_cell(dh)
+    n_dofs = ndofs_per_cell(dh_a)
     Ke = zeros(T, n_dofs, n_dofs)
     Re = zeros(T, n_dofs)
 
@@ -195,7 +195,7 @@ function assemble_monolithic!(
 
     qp_count = 1
 
-    for cell in CellIterator(dh)
+    for cell in CellIterator(dh_a)
         reinit!(cv_u, cell)
         reinit!(cv_d, cell)
 
