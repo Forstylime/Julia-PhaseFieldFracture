@@ -114,7 +114,7 @@ end
 """
     surface_energy_monolithic(dh::DofHandler, x_global::Vector{Float64}, mat, cv_d)
 
-整体法 (Monolithic) 的断裂表面能计算版本。
+整体法 (Monolithic) 的断裂表面能 𝒢_f(d) 计算版本。
 """
 function surface_energy_monolithic(
     dh::DofHandler, x_global::Vector{Float64},

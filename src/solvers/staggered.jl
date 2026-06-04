@@ -15,7 +15,7 @@ using SparseArrays
 function solve_staggered(
     setup::TensionSetup, mat::PhaseFieldMaterial;
     n_steps = 100,          # 总载荷步数 (论文设为 100 步)
-    tol = 1e-6,             # Newton 迭代和交错循环的收敛容差
+    tol = 1e-5,             # Newton 迭代和交错循环的收敛容差
     max_iter = 20           # 内层交错循环的最大允许次数
 )
     # --- 1. 提取网格与自由度 ---
@@ -25,22 +25,7 @@ function solve_staggered(
     ch_u = setup.ch_u
     ch_d = setup.ch_d
 
-    # 构建节点→位移自由度映射 (1=x, 2=y)，用于提取右边反力
-    node_dofs_u = zeros(Int, 2, getnnodes(grid))
-    for cell_id in 1:getncells(grid)
-        cell = getcells(grid, cell_id)
-        dofs = celldofs(dh_u, cell_id)
-        for (local_node, node_id) in pairs(cell.nodes)
-            node_dofs_u[1, node_id] = dofs[(local_node - 1) * 2 + 1]
-            node_dofs_u[2, node_id] = dofs[(local_node - 1) * 2 + 2]
-        end
-    end
-
-    # 筛选 x 坐标最大的节点（右边），取出其竖向位移自由度编号
-    coords_x = [node.x[1] for node in grid.nodes]
-    right_x = maximum(coords_x)
-    right_nodes = findall(x -> isapprox(x, right_x; atol = 1e-12, rtol = 1e-12), coords_x)
-    right_x_dofs = [node_dofs_u[2, node_id] for node_id in right_nodes]
+    right_x_dofs = get_right_dofs(grid, dh_u)
     
     ndofs_u = ndofs(dh_u)
     ndofs_d = ndofs(dh_d)
@@ -177,11 +162,7 @@ function solve_staggered(
         # ==========================================
         # 步骤 E: 计算反力与输出 VTK
         # ==========================================
-        # 计算整张网格的内力 (包含所有未被零化边界条件破坏的力)
-        assemble_u!(K_u, R_u, dh_u, dh_d, u_n, d_n, mat, cv_u, cv_d)
-        
-        # 提取右边竖向位移自由度的反力并求和，得到总反力
-        f__total = sum(R_u[dof] for dof in right_x_dofs)
+        f__total = compute_reaction_forces(right_x_dofs, K_u, R_u, dh_u, dh_d, u_n, d_n, mat, cv_u, cv_d)
         
         push!(displacements, current_disp)
         push!(reaction_forces, f__total)

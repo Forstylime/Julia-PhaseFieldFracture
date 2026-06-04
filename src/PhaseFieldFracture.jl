@@ -59,5 +59,8 @@ export
     assemble_monolithic!,
     compute_g,
     update_history_mono!,
+    get_right_dofs,
+    compute_reaction_forces,
+    solve_crisfield_quadratic,
     adapt_rho!
 end

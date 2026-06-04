@@ -71,7 +71,7 @@ ax_energy = Axis(fig_energy[1, 1],
     xgridcolor = :lightgray,
     ygridcolor = :lightgray,
 )
-lines!(ax_energy, disp_plot, psi_energy; linewidth = 2, color = :steelblue, label = L"\Psi\ \mathrm{(elastic)}")
+#lines!(ax_energy, disp_plot, psi_energy; linewidth = 2, color = :steelblue, label = L"\Psi\ \mathrm{(elastic)}")
 lines!(ax_energy, disp_plot, gf_energy; linewidth = 2, color = :darkorange, label = L"\mathcal{G}_f\ \mathrm{(surface)}")
 axislegend(ax_energy; position = :lt)
 save("data/plots/energy_evolution_sem.png", fig_energy)
