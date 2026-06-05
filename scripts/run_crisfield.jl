@@ -16,14 +16,14 @@ mat = PhaseFieldMaterial(
     ν = 0.18,
     gc = 0.65,
     l = 10,
-    k_tol = 1e-6,
+    k_tol = 1e-8
 )
 
 disp, force, psi_energy, gf_energy = solve_crisfield(
     setup, mat;
-    ρ_init = 0.02,        # 初始弧长步长 (更小的步长以解析峰值)
-    max_steps = 200,      # 足够的步数以解析峰值和软化段
-    tol = 1e-5,           # RMS残差容差
+    ρ_init = 0.01,        # 初始弧长步长 (更小的步长以解析峰值)
+    max_steps = 500,      # 足够的步数以解析峰值和软化段
+    tol = 1e-6,           # RMS残差容差
     max_newton = 20,      # Newton 迭代上限 (非线性区域需要更多迭代)
     λ_max = 1.0,          # 加载到最终位移
     output_freq = 5,
@@ -31,7 +31,7 @@ disp, force, psi_energy, gf_energy = solve_crisfield(
 
 # 可视化载荷-位移曲线和能量演变
 disp_plot = -disp
-force_plot = force
+force_plot = -force
 
 peak_idx = argmax(force_plot)
 peak_force = force_plot[peak_idx]

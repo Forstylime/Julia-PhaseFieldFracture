@@ -160,12 +160,9 @@ function assemble_mass_matrix_d!(
     end
 end
 
-
 """
 使用统一的 DofHandler 组装整体刚度矩阵 K_aa 和残差 r_a。
 这就是论文 Eq. 23 和 Eq. 24 中的 K_aa 和 f_int。
-
-⚠️ 注意：当前没有谱分解 (MCR)，与 staggered 的 assemble_u! 保持物理一致。
 """
 function assemble_monolithic!(
     K_aa::Union{AbstractMatrix{T}, Nothing}, r_a::AbstractVector{T},
@@ -185,11 +182,6 @@ function assemble_monolithic!(
     n_dofs = ndofs_per_cell(dh_a)
     Ke = zeros(T, n_dofs, n_dofs)
     Re = zeros(T, n_dofs)
-
-    # 四阶各向同性弹性张量 ℂ₀ (常数)
-    I2 = one(SymmetricTensor{2, 2, T})
-    I4 = one(SymmetricTensor{4, 2, T})
-    ℂ₀ = mat.λ * (I2 ⊗ I2) + 2.0 * mat.μ * I4
 
     qp_count = 1
 
@@ -211,6 +203,7 @@ function assemble_monolithic!(
             dΩ = getdetJdV(cv_u, q_point)
 
             ε_q  = function_symmetric_gradient(cv_u, q_point, u_loc)
+
             d_q  = function_value(cv_d, q_point, d_loc)
             ∇d_q = function_gradient(cv_d, q_point, d_loc)
 
@@ -218,15 +211,14 @@ function assemble_monolithic!(
             g_q  = (1.0 - d_q)^2 + mat.k_tol
             dg_q = -2.0 * (1.0 - d_q)
 
-            # ---- 各向同性无分解应力 ----
-            σ₀  = mat.λ * tr(ε_q) * one(ε_q) + 2.0 * mat.μ * ε_q
-            σ_real = g_q * σ₀
+            # ---- 分解应力 ----
+            split_results = miehe_spectral_decomposition(ε_q, T(mat.λ), T(mat.μ))
+            σ_real = g_q * split_results.σ
 
             # ---- 历史变量 ----
-            ψ₀ = (mat.λ / 2) * tr(ε_q)^2 + mat.μ * (ε_q ⊡ ε_q)
             H_old_q = H_old[qp_count]
-            is_active = ψ₀ > H_old_q
-            H_q = is_active ? ψ₀ : H_old_q
+            is_active = split_results.ψ_pos > H_old_q
+            H_q = is_active ? split_results.ψ_pos : H_old_q
 
             # ---- 相场系数 ----
             coef_d    = mat.gc / mat.l + 2.0 * H_q
@@ -244,19 +236,19 @@ function assemble_monolithic!(
                 Re[I_u] += (σ_real ⊡ δε_i) * dΩ
 
                 if K_aa !== nothing
-                    ℂ = g_q * ℂ₀
+                    ℂ_damage = g_q * split_results.ℂ
                     # K_uu: ∂R_u/∂u
                     for j in eachindex(u_range)
                         J_u = u_range[j]
                         Δε_j = shape_symmetric_gradient(cv_u, q_point, j)
-                        Ke[I_u, J_u] += (δε_i ⊡ ℂ ⊡ Δε_j) * dΩ
+                        Ke[I_u, J_u] += (δε_i ⊡ ℂ_damage ⊡ Δε_j) * dΩ
                     end
 
                     # K_ud: ∂R_u/∂d
                     for j in eachindex(d_range)
                         J_d = d_range[j]
                         N_j = shape_value(cv_d, q_point, j)
-                        Ke[I_u, J_d] += dg_q * (σ₀ ⊡ δε_i) * N_j * dΩ
+                        Ke[I_u, J_d] += dg_q * (split_results.σ ⊡ δε_i) * N_j * dΩ
                     end
                 end
             end
@@ -278,7 +270,7 @@ function assemble_monolithic!(
                         for j in eachindex(u_range)
                             J_u = u_range[j]
                             Δε_j = shape_symmetric_gradient(cv_u, q_point, j)
-                            Ke[I_d, J_u] += 2.0 * (d_q - 1.0) * δd_i * (σ₀ ⊡ Δε_j) * dΩ
+                            Ke[I_d, J_u] += 2.0 * (d_q - 1.0) * δd_i * (split_results.σ ⊡ Δε_j) * dΩ
                         end
                     end
 

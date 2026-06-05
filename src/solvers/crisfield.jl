@@ -72,11 +72,12 @@ function solve_crisfield(
     ρ = ρ_init
     Δa_n = zeros(n_dofs) # 上一个收敛步的总增量，用于判断前进方向
     n_step = 1
+    t_start = time()
 
     println("开始 Crisfield 弧长法 (Monolithic)，ρ_init = $ρ, λ_max = $λ_max")
 
     while λ_n <= λ_max && n_step < max_steps
-        println("=== 载荷步 $n_step | λ = $(round(λ_n, digits=6)) | ρ = $(round(ρ, digits=6)) ===")
+        println("=== 载荷步 $n_step | λ = $(round(λ_n, digits=4)) | ρ = $(round(ρ, digits=4)) ===")
 
         # =============================================
         # PHASE 1: PREDICTOR (预测步)
@@ -109,7 +110,7 @@ function solve_crisfield(
         Δa_iter = copy(δa_pred) # 当前增量步的累计增量
 
         # =============================================
-        # PHASE 2: CORRECTOR (Modified Newton)
+        # PHASE 2: CORRECTOR (Full Newton)
         # =============================================
         converged = false
         iters_newton = 0
@@ -117,7 +118,7 @@ function solve_crisfield(
             iters_newton = iter
             assemble_monolithic!(K_mono, r_mono, dh, a_cur, H_old, mat, cv_u, cv_d)
 
-            # --- 1. 收敛检查 ---
+            # --- 2.1. 收敛检查 ---
             r_check = -copy(r_mono)
             apply_zero!(r_check, ch_zero)
             res_norm = norm(r_check)
@@ -127,19 +128,19 @@ function solve_crisfield(
                 break
             end
 
-            # --- 2. 计算载荷方向增量 δa_λ ---
+            # --- 2.2. 计算载荷方向增量 δa_λ ---
             K_λ = copy(K_mono)
             f_λ = zeros(n_dofs)
             apply!(K_λ, f_λ, ch_ref)
             δa_λ = K_λ \ f_λ
 
-            # --- 3. 计算残差方向增量 δa_r ---
+            # --- 2.3. 计算残差方向增量 δa_r ---
             K_r = copy(K_mono)
             r = -copy(r_mono)
             apply!(K_r, r, ch_zero)
             δa_r = K_r \ r
 
-            # --- 4. 采用一致线性化公式 (26) 求解标量 δλ (只针对位移自由度 idx_u) ---
+            # --- 2.4. 采用一致线性化公式 (26) 求解标量 δλ (只针对位移自由度 idx_u) ---
             Δu_iter = Δa_iter[idx_u]
             δu_r = δa_r[idx_u]
             δu_λ = δa_λ[idx_u]
@@ -159,7 +160,7 @@ function solve_crisfield(
             # 3. 得到线性化步长 δλ
             δλ = numerator / denominator
            
-            # --- 5. 更新状态 ---
+            # --- 2.5. 更新状态 ---
             δa_total = δa_r .+ δλ .* δa_λ
             Δa_iter .+= δa_total
             a_cur .+= δa_total
@@ -172,8 +173,8 @@ function solve_crisfield(
         if converged
             Δa_n .= Δa_iter # 记录本步收敛的纯增量，供下一步判断方向
             
-            # 【修复4】：动态放大弧长，加速收敛
-            if iters_newton <= 4
+            # 动态放大弧长，加速收敛
+            if iters_newton <= 3
                 ρ = min(ρ * 1.2, ρ_init * 5.0) # 设一个最大弧长限制
             end
         else
@@ -190,24 +191,23 @@ function solve_crisfield(
 
         # 为了计算严谨的反力和能量，最后用收敛态装配一次
         assemble_monolithic!(K_mono, r_mono, dh, a_n, H_old, mat, cv_u, cv_d)
-        
-        f_total = sum(r_mono[dof] for dof in right_dofs)
+        f_reac = sum(r_mono[dof] for dof in right_dofs)
 
-        # 记录数据 (注意这里默认 final_displacement 是参考基准)
+        # 记录数据 (这里 final_displacement 是参考基准)
         push!(displacements, λ_n * setup.final_displacement)
-        push!(reaction_forces, f_total)
+        push!(reaction_forces, f_reac)
         push!(elastic_energies, elastic_energy_monolithic(dh, a_n, mat, cv_u, cv_d))
         push!(surface_energies, surface_energy_monolithic(dh, a_n, mat, cv_d)) 
 
         if n_step % output_freq == 0
-            VTKGridFile("data/sims/crisfield/fracture_step_$n_step", setup.grid) do vtk
+            VTKGridFile("data/sims/crisfield/crisfield_step_$n_step", setup.grid) do vtk
                 write_solution(vtk, dh, a_n) 
             end
         end
-        
         n_step += 1
     end
 
-    println("Crisfield 仿真结束。")
+    println("仿真结束！VTK 文件保存在 data/sims/crisfield 目录下。")
+    println("计算耗时: $(round(time() - t_start, digits=2)) 秒")
     return displacements, reaction_forces, elastic_energies, surface_energies
 end

@@ -26,7 +26,6 @@ end
 
 Macaulay 括号，用于提取正数或负数部分，对应论文公式里的 ⟨x⟩±。
 """
-
 @inline macauley_plus(x::Real) = max(x, zero(x))
 @inline macauley_minus(x::Real) = min(x, zero(x))
 
@@ -100,4 +99,78 @@ function tensile_energy_density(ε::SymmetricTensor{2,2,T}, mat::PhaseFieldMater
     ε_plus, _ = strain_spectral_split(ε)
     tr_ε = tr(ε)
     return (mat.λ / 2) * macauley_plus(tr_ε)^2 + mat.μ * tr(ε_plus ⋅ ε_plus)
+end
+
+
+
+"""
+根据 Miehe 的谱分解，计算应力、拉伸能和一致切线刚度张量。
+正确处理了主应变相等的退化情况。
+
+返回: NamedTuple (σ=..., ψ_pos=..., ℂ=...)
+"""
+function miehe_spectral_decomposition(
+    ε::SymmetricTensor{2, 2, T}, 
+    λ_bar::T, 
+    μ::T
+) where T
+    
+    I2 = one(SymmetricTensor{2, 2, T})
+    I4_sym =let
+        I = one(Tensor{2, 2, T})
+        (kron(I, I) + permutedims(kron(I, I), (1, 3, 2, 4))) / 2.0
+    end
+
+    # --- 1. 特征值分解 ---
+    vals, vecs = eigen(ε)
+    λ₁, λ₂ = vals[1], vals[2]
+    n₁, n₂ = vecs[1], vecs[2]
+
+    # --- 2. 计算拉伸相关量 ---
+    pos(x) = x > 0.0 ? x : 0.0
+    H(x) = x > 0.0 ? 1.0 : 0.0
+
+    λ₁⁺, λ₂⁺ = pos(λ₁), pos(λ₂)
+    
+    tr_ε = λ₁ + λ₂
+    tr_ε_pos = pos(tr_ε)
+
+    ε_pos = λ₁⁺ * (n₁ ⊗ n₁) + λ₂⁺ * (n₂ ⊗ n₂)
+    ψ_pos = (λ_bar / 2.0) * tr_ε_pos^2 + μ * (λ₁⁺^2 + λ₂⁺^2)
+    σ = λ_bar * tr_ε_pos * I2 + 2.0 * μ * ε_pos
+
+    # --- 3. 计算一致切线刚度张量 ℂ ---
+    ℂ = zero(SymmetricTensor{4, 2, T})
+
+    # 3.1 体积部分 (来自 tr(ε))
+    ℂ += λ_bar * H(tr_ε) * (I2 ⊗ I2)
+
+    # 3.2 偏量部分的主方向贡献
+    P₁ = n₁ ⊗ n₁
+    P₂ = n₂ ⊗ n₂
+    ℂ += 2.0 * μ * H(λ₁) * (P₁ ⊗ P₁)
+    ℂ += 2.0 * μ * H(λ₂) * (P₂ ⊗ P₂)
+
+    # 3.3 偏量部分的耦合项（最复杂的部分）
+    if !isapprox(λ₁, λ₂; atol=1e-8)
+        # 非退化情况
+        coef = 2.0 * μ * (λ₁⁺ - λ₂⁺) / (λ₁ - λ₂)
+        # 构造耦合张量 M₁₂
+        M₁₂ = (o_outer(n₁, n₂, n₂, n₁) + o_outer(n₁, n₂, n₁, n₂) +
+               o_outer(n₂, n₁, n₂, n₁) + o_outer(n₂, n₁, n₁, n₂)) / 2.0
+        ℂ += coef * M₁₂
+    else
+        # 退化情况 (λ₁ ≈ λ₂), 此时分子分母的导数之比为 H(λ₁)
+        coef = 2.0 * μ * H(λ₁)
+        # I₄_dev = I₄_sym - (1/2)*(I2⊗I2), P₁ + P₂ = I₂
+        # 最终退化为标准的各向同性偏量切线
+        ℂ += coef * (I4_sym - P₁ ⊗ P₁ - P₂ ⊗ P₂) 
+    end
+    
+    return (σ = σ, ψ_pos = ψ_pos, ℂ = ℂ)
+end
+
+# 辅助函数 o_outer(a,b,c,d) = a⊗b⊗c⊗d
+function o_outer(a,b,c,d)
+    symmetric(kron(kron(a,b), kron(c,d)))
 end

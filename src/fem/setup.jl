@@ -375,7 +375,7 @@ end
 
 为整体式 DofHandler 创建边界条件。
 """
-function create_arc_length_bcs(dh, grid, crack_nodes)
+function create_arc_length_bcs(dh, grid, crack_nodes, final_displacement = 0.0)
     top = Ferrite.getfacetset(grid, "top")
     right = Ferrite.getfacetset(grid, "right")
 
@@ -388,7 +388,7 @@ function create_arc_length_bcs(dh, grid, crack_nodes)
     Ferrite.add!(ch_ref, Ferrite.Dirichlet(:u, top, (x, t) -> zeros(2), [1, 2]))
     
     # 【Trick 核心】右侧施加竖向参考位移 1.0 (之后由 solver 里的 λ 自动放大)
-    Ferrite.add!(ch_ref, Ferrite.Dirichlet(:u, right, (x, t) -> 0.8, 2))
+    Ferrite.add!(ch_ref, Ferrite.Dirichlet(:u, right, (x, t) -> final_displacement, 2))
     
     # 预制裂纹相场约束: 必须为 0.0 (因为我们求解的是增量，裂纹增量为0代表裂纹保持)
     if !isempty(crack_nodes)
@@ -425,7 +425,7 @@ end
 """
 function setup_l_tension_monolithic(;
     msh_file = "data/mesh/l_shape.msh",
-    final_displacement = 0.8, # 最终希望算到的位移量
+    final_displacement = -0.8, # 最终希望算到的位移量
 )
     grid = create_l_shape_grid(msh_file)
     crack_nodes = Int[] # L形通常不需要预制裂纹
@@ -434,7 +434,7 @@ function setup_l_tension_monolithic(;
     dh = create_monolithic_dofhandler(grid)
     
     # 2. 获取弧长法专用的两套 ConstraintHandler
-    ch_ref, ch_zero = create_arc_length_bcs(dh, grid, crack_nodes)
+    ch_ref, ch_zero = create_arc_length_bcs(dh, grid, crack_nodes, final_displacement)
     
     return MonolithicTensionSetup(grid, dh, ch_ref, ch_zero, crack_nodes, final_displacement)
 end
