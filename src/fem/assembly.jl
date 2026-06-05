@@ -48,11 +48,8 @@ function assemble_u!(
             ε_q = function_symmetric_gradient(cv_u, q_point, u_loc)
             d_q = function_value(cv_d, q_point, d_loc)
             
-            # 谱分解能量在特征值重复时做二阶自动微分容易产生 NaN。
-            # 位移方程使用稳定的退化线弹性切线，历史变量仍在 `update_history!`
-            # 中通过拉伸谱能量控制裂纹不可逆演化。
-            #g_q = (1.0 - d_q)^2 + mat.k_tol
-            #ψ(ε) = g_q * ((mat.λ / 2) * tr(ε)^2 + mat.μ * tr(ε ⋅ ε))
+            # 能量谱分解，在特征值重复时做二阶自动微分容易产生 NaN 的问题，
+            # 已在 constitutive.jl 中添加微小扰动 ε_pert 以避免这个问题。
             ψ(ε) = elastic_energy_density(ε, d_q, mat)
             
             # 直接使用 Tensors.jl 求一阶导得到应力 σ，求二阶导得到四阶材料刚度张量 ℂ
@@ -238,7 +235,6 @@ function assemble_monolithic!(
             # ----------------------------------------------------
             # 填入单元残差 Re（及可选的 Ke）
             # ----------------------------------------------------
-            
             # 1. 位移场部分
             for i in eachindex(u_range)
                 I_u = u_range[i]

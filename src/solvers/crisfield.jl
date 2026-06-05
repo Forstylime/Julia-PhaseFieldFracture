@@ -89,11 +89,11 @@ function solve_crisfield(
         
         δa_λ_pred = K_f_pred \ f_f_pred
 
-        # 【修复1】：弧长缩放必须只针对位移自由度！
+        # 弧长缩放必须只针对位移自由度！
         norm_δu_λ_pred = norm(δa_λ_pred[idx_u])
         abs_δλ_pred = ρ / norm_δu_λ_pred
 
-        # 【修复2】：方向判断点积也只针对位移自由度
+        # 方向判断点积也只针对位移自由度
         if n_step == 1
             sign_δλ = 1.0
         else
@@ -121,8 +121,6 @@ function solve_crisfield(
             r_check = -copy(r_mono)
             apply_zero!(r_check, ch_zero)
             res_norm = norm(r_check)
-            
-            # println("    Iter $iter: res_norm = $res_norm") # 调试时可打开
 
             if res_norm <= tol
                 converged = true
@@ -141,18 +139,26 @@ function solve_crisfield(
             apply!(K_r, r, ch_zero)
             δa_r = K_r \ r
 
-            # --- 4. 求解一元二次方程 (【修复3】：切记只提取 idx_u) ---
+            # --- 4. 采用一致线性化公式 (26) 求解标量 δλ (只针对位移自由度 idx_u) ---
             Δu_iter = Δa_iter[idx_u]
             δu_r = δa_r[idx_u]
             δu_λ = δa_λ[idx_u]
 
-            a_coef = dot(δu_λ, δu_λ)
-            b_coef = 2.0 * dot(Δu_iter .+ δu_r, δu_λ)
-            c_coef = dot(Δu_iter .+ δu_r, Δu_iter .+ δu_r) - ρ^2
+            # 计算 1: 当前弧长约束的偏差标量值 f_bullet
+            f_bullet = dot(Δu_iter, Δu_iter) - ρ^2
 
-            # 这里调用你的 util 函数
-            δλ = solve_crisfield_quadratic(a_coef, b_coef, c_coef, Δu_iter, δu_r, δu_λ)
+            # 计算 2: 导数与增量的点积
+            # 因为约束 f = Δu_iter^2 - ρ^2 对 u 的梯度是 2 * Δu_iter
+            # 所以 K_la * δa_r 即为 2 * dot(Δu_iter, δu_r)
+            # K_la * δa_λ 即为 2 * dot(Δu_iter, δu_λ)
+            # 此外，K_ll = 0.0 (因为约束中不包含载荷因子 λ)
             
+            numerator = -(f_bullet + 2.0 * dot(Δu_iter, δu_r))
+            denominator = 2.0 * dot(Δu_iter, δu_λ)
+
+            # 3. 得到线性化步长 δλ
+            δλ = numerator / denominator
+           
             # --- 5. 更新状态 ---
             δa_total = δa_r .+ δλ .* δa_λ
             Δa_iter .+= δa_total
@@ -167,7 +173,7 @@ function solve_crisfield(
             Δa_n .= Δa_iter # 记录本步收敛的纯增量，供下一步判断方向
             
             # 【修复4】：动态放大弧长，加速收敛
-            if iters_newton <= 2
+            if iters_newton <= 4
                 ρ = min(ρ * 1.2, ρ_init * 5.0) # 设一个最大弧长限制
             end
         else
@@ -182,7 +188,7 @@ function solve_crisfield(
         a_n .= a_cur
         λ_n = λ_cur
 
-        # 为了计算严谨的反力和能量，最后用收敛态装配一次（非常标准的好习惯）
+        # 为了计算严谨的反力和能量，最后用收敛态装配一次
         assemble_monolithic!(K_mono, r_mono, dh, a_n, H_old, mat, cv_u, cv_d)
         
         f_total = sum(r_mono[dof] for dof in right_dofs)
