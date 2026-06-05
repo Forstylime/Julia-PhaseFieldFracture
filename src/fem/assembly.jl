@@ -51,8 +51,9 @@ function assemble_u!(
             # 谱分解能量在特征值重复时做二阶自动微分容易产生 NaN。
             # 位移方程使用稳定的退化线弹性切线，历史变量仍在 `update_history!`
             # 中通过拉伸谱能量控制裂纹不可逆演化。
-            g_q = (1.0 - d_q)^2 + mat.k_tol
-            ψ(ε) = g_q * ((mat.λ / 2) * tr(ε)^2 + mat.μ * tr(ε ⋅ ε))
+            #g_q = (1.0 - d_q)^2 + mat.k_tol
+            #ψ(ε) = g_q * ((mat.λ / 2) * tr(ε)^2 + mat.μ * tr(ε ⋅ ε))
+            ψ(ε) = elastic_energy_density(ε, d_q, mat)
             
             # 直接使用 Tensors.jl 求一阶导得到应力 σ，求二阶导得到四阶材料刚度张量 ℂ
             σ = Tensors.gradient(ψ, ε_q)

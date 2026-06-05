@@ -69,6 +69,8 @@ end
 """
 function elastic_energy_density(ε::SymmetricTensor{2,2,T}, d::Real, mat::PhaseFieldMaterial) where T
     # 1. 谱分解得到拉伸与压缩应变
+    ε_pert = SymmetricTensor{2, 2}((1e-14, 0.0, -1e-14))
+    ε = ε + ε_pert # 添加微小扰动，避免特征值重根引发的 AD 求导 NaN
     ε_plus, ε_minus = strain_spectral_split(ε)
     
     # 2. 计算纯净材料的拉伸能量 Ψ0+ 和压缩能量 Ψ0-
@@ -93,6 +95,8 @@ end
 对应论文 Eq. (18) 中的 Ψ0+(ε(u)).
 """
 function tensile_energy_density(ε::SymmetricTensor{2,2,T}, mat::PhaseFieldMaterial) where T
+    ε_pert = SymmetricTensor{2, 2}((1e-14, 0.0, -1e-14))
+    ε = ε + ε_pert # 添加微小扰动，避免特征值重根引发的 AD 求导 NaN
     ε_plus, _ = strain_spectral_split(ε)
     tr_ε = tr(ε)
     return (mat.λ / 2) * macauley_plus(tr_ε)^2 + mat.μ * tr(ε_plus ⋅ ε_plus)
