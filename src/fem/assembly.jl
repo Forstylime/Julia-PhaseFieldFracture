@@ -12,20 +12,20 @@ using SparseArrays
 这是非线性牛顿迭代的核心步骤。
 """
 function assemble_u!(
-    K::SparseMatrixCSC, R::Vector{Float64}, 
+    K::AbstractMatrix{T}, R::AbstractVector{T}, # 允许 T 类型 (Float64 或 Dual)
     dh_u::DofHandler, dh_d::DofHandler,
-    u_global::Vector{Float64}, d_global::Vector{Float64}, 
+    u_global::AbstractVector{T}, d_global::AbstractVector, # 位移设为 T
     mat::PhaseFieldMaterial, 
     cv_u::CellValues, cv_d::CellValues
-)
+) where T <: Real # 使用参数化类型 T
     # 初始化汇编器，自动把单元矩阵加到全局稀疏矩阵的对应位置
     assembler = start_assemble(K, R)
     
     n_basefuncs_u = getnbasefunctions(cv_u)
     
     # 获取每个单元的局部矩阵和向量缓存
-    Ke = zeros(n_basefuncs_u, n_basefuncs_u)
-    Re = zeros(n_basefuncs_u)
+    Ke = zeros(T, n_basefuncs_u, n_basefuncs_u)
+    Re = zeros(T, n_basefuncs_u)
     
     # 遍历每一个网格单元 (同时遍历 u 和 d 的自由度布局)
     for (cell_u, cell_d) in zip(CellIterator(dh_u), CellIterator(dh_d))
@@ -48,11 +48,9 @@ function assemble_u!(
             ε_q = function_symmetric_gradient(cv_u, q_point, u_loc)
             d_q = function_value(cv_d, q_point, d_loc)
             
-            # 谱分解能量在特征值重复时做二阶自动微分容易产生 NaN。
-            # 位移方程使用稳定的退化线弹性切线，历史变量仍在 `update_history!`
-            # 中通过拉伸谱能量控制裂纹不可逆演化。
-            g_q = (1.0 - d_q)^2 + mat.k_tol
-            ψ(ε) = g_q * ((mat.λ / 2) * tr(ε)^2 + mat.μ * tr(ε ⋅ ε))
+            # 能量谱分解，在特征值重复时做二阶自动微分容易产生 NaN 的问题，
+            # 已在 constitutive.jl 中添加微小扰动 ε_pert 以避免这个问题。
+            ψ(ε) = elastic_energy_density(ε, d_q, mat)
             
             # 直接使用 Tensors.jl 求一阶导得到应力 σ，求二阶导得到四阶材料刚度张量 ℂ
             σ = Tensors.gradient(ψ, ε_q)
@@ -159,5 +157,157 @@ function assemble_mass_matrix_d!(
             end
         end
         assemble!(assembler, celldofs(cell), Me)
+    end
+end
+
+"""
+使用统一的 DofHandler 组装整体刚度矩阵 K_aa 和残差 r_a。
+这就是论文 Eq. 23 和 Eq. 24 中的 K_aa 和 f_int。
+"""
+function assemble_monolithic!(
+    K_aa::Union{AbstractMatrix{T}, Nothing}, r_a::AbstractVector{T},
+    dh_a::DofHandler, x_global::AbstractVector{T},
+    H_old::AbstractVector,
+    mat::PhaseFieldMaterial,
+    cv_u::CellValues, cv_d::CellValues
+) where T <: Real
+
+    # 仅在需要装配刚度矩阵时初始化装配器
+    assembler = K_aa !== nothing ? start_assemble(K_aa, r_a) : nothing
+
+    # 获取 u 和 d 在单元矩阵中的索引范围
+    u_range = Ferrite.dof_range(dh_a, :u)
+    d_range = Ferrite.dof_range(dh_a, :d)
+
+    n_dofs = ndofs_per_cell(dh_a)
+    Ke = zeros(T, n_dofs, n_dofs)
+    Re = zeros(T, n_dofs)
+
+    qp_count = 1
+
+    for cell in CellIterator(dh_a)
+        reinit!(cv_u, cell)
+        reinit!(cv_d, cell)
+
+        c_dofs = celldofs(cell)
+        x_loc = x_global[c_dofs]
+        u_loc = x_loc[u_range]
+        d_loc = x_loc[d_range]
+
+        fill!(Re, zero(T))
+        if K_aa !== nothing
+            fill!(Ke, zero(T))
+        end
+
+        # ---- 弹性常数 ----
+        λ_bar = T(mat.λ)
+        μ = T(mat.μ)
+        I2 = one(SymmetricTensor{2, 2, T})
+        I4_sym = one(SymmetricTensor{4, 2, T})
+
+        for q_point in 1:getnquadpoints(cv_u)
+            dΩ = getdetJdV(cv_u, q_point)
+            ε_q  = function_symmetric_gradient(cv_u, q_point, u_loc)
+            
+            # 1. 计算总的（未分裂的）各向同性应力和刚度
+            σ_0 = λ_bar * tr(ε_q) * I2 + 2.0 * μ * ε_q
+            ℂ_0 = λ_bar * (I2 ⊗ I2) + 2.0 * μ * I4_sym
+
+            # 2. 进行谱分解获取正向部分
+            split_results = miehe_spectral_decomposition(ε_q, λ_bar, μ)
+            σ_pos = split_results.σ_pos
+            ℂ_pos = split_results.ℂ_pos
+
+            # 3. 计算不退化的负向（压缩）部分
+            σ_neg = σ_0 - σ_pos
+            ℂ_neg = ℂ_0 - ℂ_pos
+
+            d_q  = function_value(cv_d, q_point, d_loc)
+            ∇d_q = function_gradient(cv_d, q_point, d_loc)
+
+            # ---- 退化函数 ----
+            g_q  = (1.0 - d_q)^2 + mat.k_tol # 确保 mat.k_tol >= 1e-8
+            dg_q = -2.0 * (1.0 - d_q)
+
+            # ---- 组合退化应力 ----
+            # 修正：拉伸退化，压缩不退化
+            σ_real = g_q * σ_pos + σ_neg  
+
+            # ---- 历史变量 ----
+            H_old_q = H_old[qp_count]
+            is_active = split_results.ψ_pos > H_old_q
+            H_q = is_active ? split_results.ψ_pos : H_old_q
+
+            # ---- 相场系数 ----
+            coef_d    = mat.gc / mat.l + 2.0 * H_q
+            coef_grad = mat.gc * mat.l
+
+            # 1. 位移场部分内力和刚度装配
+            for i in eachindex(u_range)
+                I_u = u_range[i]
+                δε_i = shape_symmetric_gradient(cv_u, q_point, i)
+
+                Re[I_u] += (σ_real ⊡ δε_i) * dΩ
+
+                if K_aa !== nothing
+                    # 修正：拉伸刚度退化，压缩刚度不退化
+                    ℂ_damage = g_q * ℂ_pos + ℂ_neg 
+                    
+                    # K_uu: ∂R_u/∂u
+                    for j in eachindex(u_range)
+                        J_u = u_range[j]
+                        Δε_j = shape_symmetric_gradient(cv_u, q_point, j)
+                        Ke[I_u, J_u] += (δε_i ⊡ ℂ_damage ⊡ Δε_j) * dΩ
+                    end
+
+                    # K_ud: ∂R_u/∂d (仅与正向拉伸应力相关)
+                    for j in eachindex(d_range)
+                        J_d = d_range[j]
+                        N_j = shape_value(cv_d, q_point, j)
+                        Ke[I_u, J_d] += dg_q * (σ_pos ⊡ δε_i) * N_j * dΩ
+                    end
+                end
+            end
+
+            # 2. 相场部分
+            for i in eachindex(d_range)
+                I_d = d_range[i]
+                δd_i  = shape_value(cv_d, q_point, i)
+                ∇δd_i = shape_gradient(cv_d, q_point, i)
+
+                # R_d: 相场残差
+                Re[I_d] += coef_d * δd_i * d_q * dΩ
+                Re[I_d] += coef_grad * (∇δd_i ⋅ ∇d_q) * dΩ
+                Re[I_d] -= 2.0 * H_q * δd_i * dΩ
+
+                if K_aa !== nothing
+                    # K_du: ∂R_d/∂u
+                    if is_active
+                        for j in eachindex(u_range)
+                            J_u = u_range[j]
+                            Δε_j = shape_symmetric_gradient(cv_u, q_point, j)
+                            Ke[I_d, J_u] += 2.0 * (d_q - 1.0) * δd_i * (split_results.σ_pos ⊡ Δε_j) * dΩ
+                        end
+                    end
+
+                    # K_dd: ∂R_d/∂d
+                    for j in eachindex(d_range)
+                        J_d = d_range[j]
+                        Δd_j  = shape_value(cv_d, q_point, j)
+                        ∇Δd_j = shape_gradient(cv_d, q_point, j)
+                        Ke[I_d, J_d] += (coef_d * δd_i * Δd_j + coef_grad * (∇δd_i ⋅ ∇Δd_j)) * dΩ
+                    end
+                end
+            end
+
+            qp_count += 1
+        end
+
+        # 区分装配模式
+        if K_aa !== nothing
+            assemble!(assembler, c_dofs, Ke, Re)
+        else
+            r_a[c_dofs] .+= Re  # 绕过装配器，直接原位累加（支持自动微分）
+        end
     end
 end

@@ -65,7 +65,7 @@ ax_load = Axis(fig_load[1, 1],
     ygridcolor = :lightgray,
 )
 lines!(ax_load, disp_plot, force_plot; linewidth = 2, color = :red, linestyle = :dash) # 红色虚线
-save("data/plots/load_displacement.png", fig_load)
+save("data/plots/load_displacement_staggered.png", fig_load)
 
 # 图二：能量演变
 fig_energy = Figure(size = (600, 400))
@@ -73,19 +73,19 @@ ax_energy = Axis(fig_energy[1, 1],
     xlabel = L"\bar{u}~\mathrm{[mm]}",
     ylabel = "Energy [N·mm]",
     title = "Energy Evolution",
-    limits = ((0, maximum(disp_plot)), (0, nothing)),
+    limits = ((0, maximum(disp_plot)), (0, 82)),
     xgridvisible = true,
     ygridvisible = true,
     xgridcolor = :lightgray,
     ygridcolor = :lightgray,
 )
-lines!(ax_energy, disp_plot, psi_energy; linewidth = 2, color = :steelblue, label = L"\Psi\ \mathrm{(elastic)}")
+#lines!(ax_energy, disp_plot, psi_energy; linewidth = 2, color = :steelblue, label = L"\Psi\ \mathrm{(elastic)}")
 lines!(ax_energy, disp_plot, gf_energy; linewidth = 2, color = :darkorange, label = L"\mathcal{G}_f\ \mathrm{(surface)}")
 axislegend(ax_energy; position = :lt)
-save("data/plots/energy_evolution.png", fig_energy)
+save("data/plots/energy_evolution_staggered.png", fig_energy)
 
-println("载荷-位移曲线已保存至 data/plots/load_displacement.png。")
-println("能量演变曲线已保存至 data/plots/energy_evolution.png。")
+println("载荷-位移曲线已保存至 data/plots/load_displacement_staggered.png。")
+println("能量演变曲线已保存至 data/plots/energy_evolution_staggered.png。")
 
 # 保存数据以供后续分析
 using JLD2

@@ -18,7 +18,7 @@ include("fem/assembly.jl")
 # solvers
 include("solvers/staggered.jl")
 include("solvers/sem.jl")
-include("solvers/arc_length.jl")
+include("solvers/crisfield.jl")
 
 # utilities
 include("utils/utils_fun.jl")
@@ -31,23 +31,37 @@ export
     refine_range,
     refine_grid!,
     TensionSetup,
+    MonolithicTensionSetup,
     make_square_tension_grid,
     create_l_shape_grid,
     create_staggered_dofhandlers,
+    create_monolithic_dofhandler,
     create_displacement_constraints,
     create_phase_field_constraints,
+    create_monolithic_constraints,
     initial_crack_nodes,
     setup_square_tension,
     setup_l_tension,
+    setup_l_tension_monolithic,
     assemble_u!,
     assemble_d!,
     update_history!,
     elastic_energy,
     surface_energy,
     total_energy,
+    elastic_energy_monolithic,
+    surface_energy_monolithic,
+    total_energy_monolithic,
     solve_staggered,
     solve_sem,
-    solve_arc_length,
+    solve_crisfield,
     assemble_mass_matrix_d!,
-    compute_g
+    assemble_monolithic!,
+    compute_g,
+    update_history_mono!,
+    get_right_dofs,
+    compute_reaction_forces,
+    solve_crisfield_quadratic,
+    adapt_rho!,
+    miehe_spectral_decomposition
 end

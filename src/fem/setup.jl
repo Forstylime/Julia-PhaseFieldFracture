@@ -255,6 +255,24 @@ end
 设置拉伸边界条件、定位预制裂纹节点，并把这些对象封装到
 `TensionSetup` 中。求解脚本可以直接使用返回对象进入装配和求解阶段。
 
+# 使用方法
+```julia
+using PhaseFieldFracture
+
+setup = setup_square_tension(
+    cells = (50, 50),
+    final_displacement = 0.01,
+    crack_y = 0.0,
+    crack_x_min = -1.0,
+    crack_x_max = 0.0,
+)
+
+grid = setup.grid
+dh_u = setup.dh_u
+dh_d = setup.dh_d
+crack_nodes = setup.crack_nodes
+```
+
 # 参数说明
 - `cells`：x、y 方向的单元数量。
 - `final_displacement`：顶边竖向位移加载幅值。
@@ -311,4 +329,112 @@ function setup_l_tension(;
 
     # 统一封装初始化结果，减少求解脚本需要手动传递的对象数量。
     return TensionSetup(; grid, dh_u, dh_d, ch_u, ch_d, crack_nodes = Int[], final_displacement)
+end
+
+
+
+"""
+    MonolithicTensionSetup
+
+保存算例的有限元初始化结果（整体式版本）。
+只保留一个统一的 DofHandler 和 ConstraintHandler。
+"""
+struct MonolithicTensionSetup
+    grid::Grid
+    dh::DofHandler
+    ch_ref::ConstraintHandler   # 专门用于预测步
+    ch_zero::ConstraintHandler  # 专门用于校正步
+    crack_nodes::Vector{Int}
+    final_displacement::Float64 
+end
+
+"""
+    create_monolithic_dofhandler(grid)
+
+为整体式求解格式创建一个包含位移场(:u)和相场(:d)的统一自由度处理器。
+"""
+function create_monolithic_dofhandler(grid)
+    dh_a = Ferrite.DofHandler(grid)
+    
+    # 位移场：2维向量
+    ip_u = Ferrite.Lagrange{Ferrite.RefQuadrilateral, 1}()^2
+    Ferrite.add!(dh_a, :u, ip_u)
+    
+    # 相场：标量
+    ip_d = Ferrite.Lagrange{Ferrite.RefQuadrilateral, 1}()
+    Ferrite.add!(dh_a, :d, ip_d)
+    
+    Ferrite.close!(dh_a)
+
+    println("总自由度数量 (u + d): ", Ferrite.ndofs(dh_a))
+    return dh_a
+end
+
+"""
+    create_arc_length_bcs(dh, grid, crack_nodes)
+
+为整体式 DofHandler 创建边界条件。
+"""
+function create_arc_length_bcs(dh, grid, crack_nodes, final_displacement = 0.0)
+    top = Ferrite.getfacetset(grid, "top")
+    right = Ferrite.getfacetset(grid, "right")
+
+    # ==============================================================
+    # 1. ch_ref: 用于预测步 (求解参考位移 Δa_λ / u_T)
+    # ==============================================================
+    ch_ref = Ferrite.ConstraintHandler(dh)
+    
+    # 顶边全固定 (0.0)
+    Ferrite.add!(ch_ref, Ferrite.Dirichlet(:u, top, (x, t) -> zeros(2), [1, 2]))
+    
+    # 【Trick 核心】右侧施加竖向参考位移 1.0 (之后由 solver 里的 λ 自动放大)
+    Ferrite.add!(ch_ref, Ferrite.Dirichlet(:u, right, (x, t) -> final_displacement, 2))
+    
+    # 预制裂纹相场约束: 必须为 0.0 (因为我们求解的是增量，裂纹增量为0代表裂纹保持)
+    if !isempty(crack_nodes)
+        Ferrite.add!(ch_ref, Ferrite.Dirichlet(:d, Set(crack_nodes), (x, t) -> 0.0))
+    end
+    Ferrite.close!(ch_ref)
+    Ferrite.update!(ch_ref, 0.0) # 时间参数用不上了，随便传个0
+
+    # ==============================================================
+    # 2. ch_zero: 用于校正步 (求解残余力对应的位移修正 Δa_r)
+    # ==============================================================
+    ch_zero = Ferrite.ConstraintHandler(dh)
+    
+    # 顶边全固定 (0.0)
+    Ferrite.add!(ch_zero, Ferrite.Dirichlet(:u, top, (x, t) -> zeros(2), [1, 2]))
+    
+    # 右侧受控端：必须锁定为 0.0 (残余修正不能改变已经由 λ 决定的位移)
+    Ferrite.add!(ch_zero, Ferrite.Dirichlet(:u, right, (x, t) -> 0.0, 2))
+    
+    # 预制裂纹相场约束: 必须为 0.0
+    if !isempty(crack_nodes)
+        Ferrite.add!(ch_zero, Ferrite.Dirichlet(:d, Set(crack_nodes), (x, t) -> 0.0))
+    end
+    Ferrite.close!(ch_zero)
+    Ferrite.update!(ch_zero, 0.0)
+
+    return ch_ref, ch_zero
+end
+
+"""
+    setup_l_tension_monolithic(...)
+
+一站式初始化函数（整体式版本示例）。
+"""
+function setup_l_tension_monolithic(;
+    msh_file = "data/mesh/l_shape.msh",
+    final_displacement = -0.8, # 最终希望算到的位移量
+)
+    grid = create_l_shape_grid(msh_file)
+    crack_nodes = Int[] # L形通常不需要预制裂纹
+    
+    # 1. 创建整体式 DofHandler
+    dh = create_monolithic_dofhandler(grid)
+    
+    # 2. 获取弧长法专用的两套 ConstraintHandler
+    ch_ref, ch_zero = create_arc_length_bcs(dh, grid, crack_nodes, final_displacement)
+    
+    return MonolithicTensionSetup(grid, dh, ch_ref, ch_zero, crack_nodes, final_displacement)
 end
