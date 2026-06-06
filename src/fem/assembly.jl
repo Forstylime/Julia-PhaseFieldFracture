@@ -199,21 +199,39 @@ function assemble_monolithic!(
             fill!(Ke, zero(T))
         end
 
+        # ---- 弹性常数 ----
+        λ_bar = T(mat.λ)
+        μ = T(mat.μ)
+        I2 = one(SymmetricTensor{2, 2, T})
+        I4_sym = one(SymmetricTensor{4, 2, T})
+
         for q_point in 1:getnquadpoints(cv_u)
             dΩ = getdetJdV(cv_u, q_point)
-
             ε_q  = function_symmetric_gradient(cv_u, q_point, u_loc)
+            
+            # 1. 计算总的（未分裂的）各向同性应力和刚度
+            σ_0 = λ_bar * tr(ε_q) * I2 + 2.0 * μ * ε_q
+            ℂ_0 = λ_bar * (I2 ⊗ I2) + 2.0 * μ * I4_sym
+
+            # 2. 进行谱分解获取正向部分
+            split_results = miehe_spectral_decomposition(ε_q, λ_bar, μ)
+            σ_pos = split_results.σ_pos
+            ℂ_pos = split_results.ℂ_pos
+
+            # 3. 计算不退化的负向（压缩）部分
+            σ_neg = σ_0 - σ_pos
+            ℂ_neg = ℂ_0 - ℂ_pos
 
             d_q  = function_value(cv_d, q_point, d_loc)
             ∇d_q = function_gradient(cv_d, q_point, d_loc)
 
             # ---- 退化函数 ----
-            g_q  = (1.0 - d_q)^2 + mat.k_tol
+            g_q  = (1.0 - d_q)^2 + mat.k_tol # 确保 mat.k_tol >= 1e-8
             dg_q = -2.0 * (1.0 - d_q)
 
-            # ---- 分解应力 ----
-            split_results = miehe_spectral_decomposition(ε_q, T(mat.λ), T(mat.μ))
-            σ_real = g_q * split_results.σ
+            # ---- 组合退化应力 ----
+            # 修正：拉伸退化，压缩不退化
+            σ_real = g_q * σ_pos + σ_neg  
 
             # ---- 历史变量 ----
             H_old_q = H_old[qp_count]
@@ -224,19 +242,17 @@ function assemble_monolithic!(
             coef_d    = mat.gc / mat.l + 2.0 * H_q
             coef_grad = mat.gc * mat.l
 
-            # ----------------------------------------------------
-            # 填入单元残差 Re（及可选的 Ke）
-            # ----------------------------------------------------
-            # 1. 位移场部分
+            # 1. 位移场部分内力和刚度装配
             for i in eachindex(u_range)
                 I_u = u_range[i]
                 δε_i = shape_symmetric_gradient(cv_u, q_point, i)
 
-                # R_u: 内力残差
                 Re[I_u] += (σ_real ⊡ δε_i) * dΩ
 
                 if K_aa !== nothing
-                    ℂ_damage = g_q * split_results.ℂ
+                    # 修正：拉伸刚度退化，压缩刚度不退化
+                    ℂ_damage = g_q * ℂ_pos + ℂ_neg 
+                    
                     # K_uu: ∂R_u/∂u
                     for j in eachindex(u_range)
                         J_u = u_range[j]
@@ -244,11 +260,11 @@ function assemble_monolithic!(
                         Ke[I_u, J_u] += (δε_i ⊡ ℂ_damage ⊡ Δε_j) * dΩ
                     end
 
-                    # K_ud: ∂R_u/∂d
+                    # K_ud: ∂R_u/∂d (仅与正向拉伸应力相关)
                     for j in eachindex(d_range)
                         J_d = d_range[j]
                         N_j = shape_value(cv_d, q_point, j)
-                        Ke[I_u, J_d] += dg_q * (split_results.σ ⊡ δε_i) * N_j * dΩ
+                        Ke[I_u, J_d] += dg_q * (σ_pos ⊡ δε_i) * N_j * dΩ
                     end
                 end
             end
@@ -270,7 +286,7 @@ function assemble_monolithic!(
                         for j in eachindex(u_range)
                             J_u = u_range[j]
                             Δε_j = shape_symmetric_gradient(cv_u, q_point, j)
-                            Ke[I_d, J_u] += 2.0 * (d_q - 1.0) * δd_i * (split_results.σ ⊡ Δε_j) * dΩ
+                            Ke[I_d, J_u] += 2.0 * (d_q - 1.0) * δd_i * (split_results.σ_pos ⊡ Δε_j) * dΩ
                         end
                     end
 

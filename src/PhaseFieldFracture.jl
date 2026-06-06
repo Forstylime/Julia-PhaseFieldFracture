@@ -62,5 +62,6 @@ export
     get_right_dofs,
     compute_reaction_forces,
     solve_crisfield_quadratic,
-    adapt_rho!
+    adapt_rho!,
+    miehe_spectral_decomposition
 end

@@ -207,7 +207,7 @@ function solve_crisfield(
         n_step += 1
     end
 
-    println("仿真结束！VTK 文件保存在 data/sims/crisfield 目录下。")
+    println("Crisfield 仿真结束！VTK 文件保存在 data/sims/crisfield 目录下。")
     println("计算耗时: $(round(time() - t_start, digits=2)) 秒")
     return displacements, reaction_forces, elastic_energies, surface_energies
 end

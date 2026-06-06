@@ -116,15 +116,14 @@ function miehe_spectral_decomposition(
 ) where T
     
     I2 = one(SymmetricTensor{2, 2, T})
-    I4_sym =let
-        I = one(Tensor{2, 2, T})
-        (kron(I, I) + permutedims(kron(I, I), (1, 3, 2, 4))) / 2.0
-    end
+    I4_sym = one(SymmetricTensor{4, 2, T}) # 4阶对称单位张量
 
     # --- 1. 特征值分解 ---
     vals, vecs = eigen(ε)
     λ₁, λ₂ = vals[1], vals[2]
-    n₁, n₂ = vecs[1], vecs[2]
+    #n₁, n₂ = vecs[1], vecs[2]
+    n₁ = vecs[:, 1]
+    n₂ = vecs[:, 2]
 
     # --- 2. 计算拉伸相关量 ---
     pos(x) = x > 0.0 ? x : 0.0
@@ -146,13 +145,15 @@ function miehe_spectral_decomposition(
     ℂ += λ_bar * H(tr_ε) * (I2 ⊗ I2)
 
     # 3.2 偏量部分的主方向贡献
-    P₁ = n₁ ⊗ n₁
-    P₂ = n₂ ⊗ n₂
+    #P₁ = n₁ ⊗ n₁
+    #P₂ = n₂ ⊗ n₂
+    P₁ = symmetric(n₁ ⊗ n₁)
+    P₂ = symmetric(n₂ ⊗ n₂)
     ℂ += 2.0 * μ * H(λ₁) * (P₁ ⊗ P₁)
     ℂ += 2.0 * μ * H(λ₂) * (P₂ ⊗ P₂)
 
     # 3.3 偏量部分的耦合项（最复杂的部分）
-    if !isapprox(λ₁, λ₂; atol=1e-8)
+    if !isapprox(λ₁, λ₂; atol=1e-8, rtol=1e-6)
         # 非退化情况
         coef = 2.0 * μ * (λ₁⁺ - λ₂⁺) / (λ₁ - λ₂)
         # 构造耦合张量 M₁₂
@@ -167,10 +168,14 @@ function miehe_spectral_decomposition(
         ℂ += coef * (I4_sym - P₁ ⊗ P₁ - P₂ ⊗ P₂) 
     end
     
-    return (σ = σ, ψ_pos = ψ_pos, ℂ = ℂ)
+    return (
+        σ_pos = σ,        # 也就是之前的 σ
+        ℂ_pos = ℂ,        # 也就是之前的 ℂ
+        ψ_pos = ψ_pos
+    )
 end
 
 # 辅助函数 o_outer(a,b,c,d) = a⊗b⊗c⊗d
-function o_outer(a,b,c,d)
-    symmetric(kron(kron(a,b), kron(c,d)))
+function o_outer(a, b, c, d)
+    symmetric((a ⊗ b) ⊗ (c ⊗ d))
 end
