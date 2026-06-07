@@ -19,6 +19,7 @@ include("fem/assembly.jl")
 include("solvers/staggered.jl")
 include("solvers/sem.jl")
 include("solvers/crisfield.jl")
+include("solvers/gamma.jl")
 
 # utilities
 include("utils/utils_fun.jl")
@@ -55,13 +56,14 @@ export
     solve_staggered,
     solve_sem,
     solve_crisfield,
+    solve_gamma,
     assemble_mass_matrix_d!,
     assemble_monolithic!,
     compute_g,
     update_history_mono!,
     get_right_dofs,
     compute_reaction_forces,
-    solve_crisfield_quadratic,
     adapt_rho!,
-    miehe_spectral_decomposition
+    miehe_spectral_decomposition,
+    evaluate_gamma_constraint
 end

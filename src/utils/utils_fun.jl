@@ -113,39 +113,55 @@ function adapt_rho!(ρ::Float64, ρ_init::Float64, success::Bool)
     end
 end
 
+
 """
-    solve_crisfield_quadratic(a, b, c, Δa_old, δa_r, δa_λ)
-Crisfield 二次方程求解器，选择使得新位移增量向量与旧增量向量夹角更小的那个根。
+计算 Γ 约束残差 f_Γ = 𝒢_f(d_curr) - 𝒢_f(d_prev) - ρ
+以及约束方程关于全体自由度的梯度向量 K_λa。
 """
-function solve_crisfield_quadratic(a::Float64, b::Float64, c::Float64, 
-                                   Δa_old::Vector{Float64}, 
-                                   δa_r::Vector{Float64}, 
-                                   δa_λ::Vector{Float64})
+function evaluate_gamma_constraint(
+    dh::DofHandler, a_global::Vector{Float64}, G_prev::Float64,
+    mat::PhaseFieldMaterial, cv_d::CellValues, ρ::Float64
+)
+    K_λa = zeros(Float64, ndofs(dh))
+    G_curr = 0.0
     
-    discriminant = b^2 - 4.0 * a * c
+    n_basefuncs_d = getnbasefunctions(cv_d)
+    K_λd_loc = zeros(Float64, n_basefuncs_d)
     
-    if discriminant < 0
-        # 极少数情况下，迭代漂移太远，切线与目标球面无交点。
-        # 严谨的做法是抛出异常，让外层程序减小弧长重试。
-        error("Crisfield二次方程无实数解 (判别式 < 0)，需要减小弧长或重置本步！")
+    d_range = dof_range(dh, :d)
+
+    for cell in CellIterator(dh)
+        reinit!(cv_d, cell)
+        global_dofs = celldofs(cell)
+        
+        a_loc = a_global[global_dofs]
+        d_loc = a_loc[d_range]
+        
+        fill!(K_λd_loc, 0.0)
+        
+        for q_point in 1:getnquadpoints(cv_d)
+            dΩ = getdetJdV(cv_d, q_point)
+            d_q = function_value(cv_d, q_point, d_loc)
+            ∇d_q = function_gradient(cv_d, q_point, d_loc)
+            
+            # 累加表面能
+            G_curr += (mat.gc / (2 * mat.l)) * (d_q^2 + mat.l^2 * (∇d_q ⋅ ∇d_q)) * dΩ
+            
+            # 计算对 d 的局部梯度
+            for i in 1:n_basefuncs_d
+                N_i = shape_value(cv_d, q_point, i)
+                ∇N_i = shape_gradient(cv_d, q_point, i)
+                K_λd_loc[i] += (mat.gc / mat.l) * (d_q * N_i + mat.l^2 * (∇d_q ⋅ ∇N_i)) * dΩ
+            end
+        end
+        
+        # 组装到全局向量
+        for i in 1:n_basefuncs_d
+            global_idx = global_dofs[d_range[i]]
+            K_λa[global_idx] += K_λd_loc[i]
+        end
     end
     
-    # 求解两个根
-    δλ_1 = (-b + sqrt(discriminant)) / (2.0 * a)
-    δλ_2 = (-b - sqrt(discriminant)) / (2.0 * a)
-    
-    # 根据两个根计算两种可能的“新位移增量向量”
-    Δa_new_1 = Δa_old .+ δa_r .+ δλ_1 .* δa_λ
-    Δa_new_2 = Δa_old .+ δa_r .+ δλ_2 .* δa_λ
-    
-    # 计算新向量与旧向量的点积 (cosθ 越大代表夹角越小)
-    dot_1 = dot(Δa_old, Δa_new_1)
-    dot_2 = dot(Δa_old, Δa_new_2)
-    
-    # 返回使得点积更大的那个 δλ
-    if dot_1 > dot_2
-        return δλ_1
-    else
-        return δλ_2
-    end
+    f_Γ = G_curr - G_prev - ρ
+    return f_Γ, K_λa, G_curr
 end

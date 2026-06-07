@@ -19,7 +19,7 @@ S-EM 仿真结束！VTK 文件保存在 data/sims/sem 目录下。
 能量演变曲线已保存至 data/plots/energy_evolution_sem.png。
 S-EM 仿真数据已保存至 data/jld2/sem_results.jld2。
 
-## Crisfield Arc Length (已修复 ✓)
+## Crisfield Arc Length (完成)
 === 载荷步 265 | λ = 0.9979 | ρ = 0.05 ===
 仿真结束！VTK 文件保存在 data/sims/crisfield 目录下。
 计算耗时: 82.11 秒
@@ -27,3 +27,10 @@ S-EM 仿真数据已保存至 data/jld2/sem_results.jld2。
 载荷-位移曲线已保存至 data/plots/load_displacement_crisfield.png。
 能量演变曲线已保存至 data/plots/energy_evolution_crisfield.png。
 Crisfield 仿真数据已保存至 data/jld2/crisfield_results.jld2。
+
+## $\Gamma$ Arc Length
+Gamma 仿真结束！计算耗时: 52.24 秒, 总步数: 117
+峰值载荷 (Gamma): F_max = 328.492 N @ ū = 0.6962 mm
+载荷-位移曲线已保存至 data/plots/load_displacement_gamma.png。
+能量演变曲线已保存至 data/plots/energy_evolution_gamma.png。
+Gamma 仿真数据已保存至 data/jld2/gamma_results.jld2。
