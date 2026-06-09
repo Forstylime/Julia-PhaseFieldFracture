@@ -28,9 +28,16 @@ S-EM 仿真数据已保存至 data/jld2/sem_results.jld2。
 能量演变曲线已保存至 data/plots/energy_evolution_crisfield.png。
 Crisfield 仿真数据已保存至 data/jld2/crisfield_results.jld2。
 
-## $\Gamma$ Arc Length
+## $\Gamma$ Arc Length (完成)
 Gamma 仿真结束！计算耗时: 52.24 秒, 总步数: 117
 峰值载荷 (Gamma): F_max = 328.492 N @ ū = 0.6962 mm
 载荷-位移曲线已保存至 data/plots/load_displacement_gamma.png。
 能量演变曲线已保存至 data/plots/energy_evolution_gamma.png。
 Gamma 仿真数据已保存至 data/jld2/gamma_results.jld2。
+
+## $H_1$ Arc Length (完成)
+H1 仿真结束！计算耗时: 21.19 秒, 总步数: 49
+峰值载荷 (H1): F_max = 328.317 N @ ū = 0.6925 mm
+载荷-位移曲线已保存至 data/plots/load_displacement_h1.png。
+能量演变曲线已保存至 data/plots/energy_evolution_h1.png。
+H1 仿真数据已保存至 data/jld2/h1_results.jld2。

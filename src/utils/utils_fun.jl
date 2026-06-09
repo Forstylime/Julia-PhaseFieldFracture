@@ -165,3 +165,40 @@ function evaluate_gamma_constraint(
     f_Γ = G_curr - G_prev - ρ
     return f_Γ, K_λa, G_curr
 end
+
+"""
+装配 H1 弧长法专用的恒定几何矩阵 H = M + l^2 S
+"""
+function assemble_H1_matrix(dh::DofHandler, cv_d::CellValues, l::Float64)
+    # 使用 allocate_matrix 替代已弃用的 create_sparsity_pattern
+    K_sparse = allocate_matrix(dh)
+    assembler = start_assemble(K_sparse)
+    
+    # 提取相场 d 的局部自由度范围
+    d_range = dof_range(dh, :d)
+    n_d = length(d_range)
+
+    for cell in CellIterator(dh)
+        reinit!(cv_d, cell)
+        # 尺寸与该单元的所有自由度（u和d）相同，但只填充 d 的部分
+        Ke = zeros(ndofs_per_cell(dh), ndofs_per_cell(dh))
+
+        for q_point in 1:getnquadpoints(cv_d)
+            dΩ = getdetJdV(cv_d, q_point)
+            for i in 1:n_d
+                N_i = shape_value(cv_d, q_point, i)
+                ∇N_i = shape_gradient(cv_d, q_point, i)
+                for j in 1:n_d
+                    N_j = shape_value(cv_d, q_point, j)
+                    ∇N_j = shape_gradient(cv_d, q_point, j)
+                    
+                    # H1 范数的核： N_i * N_j + l^2 * (∇N_i ⋅ ∇N_j)
+                    # 放入 d_range 对应的行列位置
+                    Ke[d_range[i], d_range[j]] += (N_i * N_j + l^2 * (∇N_i ⋅ ∇N_j)) * dΩ
+                end
+            end
+        end
+        assemble!(assembler, celldofs(cell), Ke)
+    end
+    return K_sparse
+end

@@ -20,6 +20,7 @@ include("solvers/staggered.jl")
 include("solvers/sem.jl")
 include("solvers/crisfield.jl")
 include("solvers/gamma.jl")
+include("solvers/h1.jl")
 
 # utilities
 include("utils/utils_fun.jl")
@@ -57,6 +58,7 @@ export
     solve_sem,
     solve_crisfield,
     solve_gamma,
+    solve_h1,
     assemble_mass_matrix_d!,
     assemble_monolithic!,
     compute_g,
