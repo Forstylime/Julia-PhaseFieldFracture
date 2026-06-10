@@ -202,3 +202,35 @@ function assemble_H1_matrix(dh::DofHandler, cv_d::CellValues, l::Float64)
     end
     return K_sparse
 end
+
+"""
+装配 L2 弧长法专用的恒定几何矩阵 M (相当于相场的质量矩阵)
+"""
+function assemble_L2_matrix(dh::DofHandler, cv_d::CellValues)
+    K_sparse = allocate_matrix(dh)
+    assembler = start_assemble(K_sparse)
+    
+    d_range = dof_range(dh, :d)
+    n_d = length(d_range)
+
+    for cell in CellIterator(dh)
+        reinit!(cv_d, cell)
+        Ke = zeros(ndofs_per_cell(dh), ndofs_per_cell(dh))
+
+        for q_point in 1:getnquadpoints(cv_d)
+            dΩ = getdetJdV(cv_d, q_point)
+            for i in 1:n_d
+                N_i = shape_value(cv_d, q_point, i)
+                # (不需要求 ∇N_i 了)
+                for j in 1:n_d
+                    N_j = shape_value(cv_d, q_point, j)
+                    
+                    # L2 范数的核：纯纯的 N_i * N_j
+                    Ke[d_range[i], d_range[j]] += (N_i * N_j) * dΩ
+                end
+            end
+        end
+        assemble!(assembler, celldofs(cell), Ke)
+    end
+    return K_sparse
+end

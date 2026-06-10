@@ -1,14 +1,14 @@
-# src/solvers/h1.jl
+# src/solvers/L2.jl
 
 using Ferrite
 using LinearAlgebra
 using SparseArrays
 
 """
-H1 弧长法求解器 (Monolithic)
-直接采用纯线性代数操作(H_mat)评估约束，无需在牛顿迭代中重算约束雅可比。
+L2 弧长法求解器 (Monolithic)
+直接采用纯线性代数操作(M_mat)评估约束，无需在牛顿迭代中重算约束雅可比。
 """
-function solve_h1(
+function solve_l2(
     setup::MonolithicTensionSetup, mat::PhaseFieldMaterial;
     # 初始步长
     ρ_init::Float64 = 0.05,         
@@ -71,13 +71,13 @@ function solve_h1(
     K_mono = allocate_matrix(dh); r_mono = zeros(n_dofs)
     
     # 【核心修改 1：在循环外一次性装配全局 H 矩阵】
-    println("正在预计算恒定 H1 几何矩阵...")
-    H_mat = assemble_H1_matrix(dh, cv_d, mat.l)
+    println("正在预计算恒定 L2 质量矩阵...")
+    M_mat = assemble_L2_matrix(dh, cv_d)
     
     displacements = Float64[0.0]; reaction_forces = Float64[0.0]
     elastic_energies = Float64[0.0]; surface_energies = Float64[0.0]
 
-    mkpath("data/sims/h1")
+    mkpath("data/sims/l2")
     
     ρ = ρ_init
     Δλ_base = Δλ_base_init
@@ -85,7 +85,7 @@ function solve_h1(
     t_start = time()
     has_fractured_before = false
 
-    println("开始 H1 弧长法，ρ_init = $ρ_init, Δλ_init = $Δλ_base_init")
+    println("开始 L2 弧长法，ρ_init = $ρ_init, Δλ_init = $Δλ_base_init")
 
     while λ_n <= λ_max && n_step < max_steps
         println("=== 载荷步 $n_step | 目标 λ ≈ $(round(λ_n + Δλ_base, digits=4)) ===")
@@ -98,13 +98,13 @@ function solve_h1(
         apply!(K_f_pred, f_f_pred, ch_ref)
         δa_λ_pred = K_f_pred \ f_f_pred
 
-        # 评估当前预测的相场变化趋势 (D_pred = Δd^T * H * Δd)
-        D_pred = dot(δa_λ_pred, H_mat * δa_λ_pred)
+        # 评估当前预测的相场变化趋势 (D_pred = Δd^T * M * Δd)
+        D_pred = dot(δa_λ_pred, M_mat * δa_λ_pred)
         
         # 智能判定：(D_pred > 1e-10) 且有实质性载荷
-        is_h1_active = (D_pred > 1e-10) && (λ_n > 0.1)
+        is_l2_active = (D_pred > 1e-10) && (λ_n > 0.1)
 
-        if !is_h1_active
+        if !is_l2_active
             δλ_pred = Δλ_base
             println("  -> [模式: 弹性] 预测 Δλ = $(round(δλ_pred, digits=4))")
         else
@@ -124,7 +124,7 @@ function solve_h1(
             # 【解除预测步限幅】原先是 clamp(-0.1, 0.1)，或许太保守了！
             # 可以考虑允许弧长法在预测时给出更大的步长
             δλ_pred = clamp(δλ_pred, -0.1, 0.1) 
-            println("  -> [模式: H1 弧长] 预测 Δλ = $(round(δλ_pred, digits=4)) (Snap-back 标志: $sign_λ)")
+            println("  -> [模式: L2 弧长] 预测 Δλ = $(round(δλ_pred, digits=4)) (Snap-back 标志: $sign_λ)")
         end
         
         δa_pred = δλ_pred .* δa_λ_pred 
@@ -149,22 +149,22 @@ function solve_h1(
             K_r = copy(K_mono); r = -copy(r_mono)
             apply!(K_r, r, ch_zero); δa_r = K_r \ r
 
-            if !is_h1_active
+            if !is_l2_active
                 δλ = 0.0
             else
                 # 【修复点 2：采用非平方 Norm 形式，彻底解决梯度归零/奇异性】
                 Δa_cur = a_cur .- a_n
-                D_cur = dot(Δa_cur, H_mat * Δa_cur)
+                D_cur = dot(Δa_cur, M_mat * Δa_cur)
                 
                 if D_cur < 1e-15
                     # 如果增量极小，强制降级为纯位移校正，避免 0/0 错位
                     δλ = 0.0
                 else
-                    norm_H1 = sqrt(D_cur)
-                    f_H1_val = norm_H1 - ρ
+                    norm_L2 = sqrt(D_cur)
+                    f_L2_val = norm_L2 - ρ
                     
-                    # 单位化梯度： K_λa_iter = (H * Δa) / norm_H1
-                    K_λa_iter = (H_mat * Δa_cur) ./ norm_H1
+                    # 单位化梯度： K_λa_iter = (M * Δa) / norm_L2
+                    K_λa_iter = (M_mat * Δa_cur) ./ norm_L2
                     
                     denominator = dot(K_λa_iter, δa_λ)
                     
@@ -173,7 +173,7 @@ function solve_h1(
                         @warn "  Newton iter $iter: 切线分母趋近零，临时冻结载荷步"
                         δλ = 0.0
                     else
-                        numerator = f_H1_val + dot(K_λa_iter, δa_r)
+                        numerator = f_L2_val + dot(K_λa_iter, δa_r)
                         δλ = - numerator / denominator 
 
                         δλ = clamp(δλ, -0.1, 0.1)
@@ -194,7 +194,7 @@ function solve_h1(
             factor = sqrt(target_iters / max(iters_newton, 1))
             factor = clamp(factor, 0.25, 2.5) 
             
-            if is_h1_active
+            if is_l2_active
                 # 【核心控制 1：断裂期精细度】
                 # 利用 ρ_max 牢牢压住弧长上限。如果 ρ_max 设得很小（比如 0.1），
                 # 哪怕牛顿法 1 步就收敛，系统也只能乖乖地一次走 0.1 的弧长
@@ -220,14 +220,14 @@ function solve_h1(
             push!(surface_energies, surface_energy_monolithic(dh, a_n, mat, cv_d)) # 记录断裂能
 
             if n_step % output_freq == 0
-                VTKGridFile("data/sims/h1/h1_step_$n_step", setup.grid) do vtk
+                VTKGridFile("data/sims/l2/l2_step_$n_step", setup.grid) do vtk
                     write_solution(vtk, dh, a_n) 
                 end
             end
             n_step += 1
         else
             @warn "未在 $max_newton 次迭代内收敛。回退状态并减小步长..."
-            if is_h1_active
+            if is_l2_active
                 ρ *= 0.5
                 if ρ < 1e-6; error("弧长 ρ 过小，仿真发散中止。"); end
             else
@@ -238,6 +238,6 @@ function solve_h1(
         end
     end
 
-    println("H1 仿真结束！计算耗时: $(round(time() - t_start, digits=2)) 秒, 总步数: $(n_step - 1)")
+    println("L2 仿真结束！计算耗时: $(round(time() - t_start, digits=2)) 秒, 总步数: $(n_step - 1)")
     return displacements, reaction_forces, elastic_energies, surface_energies
 end
