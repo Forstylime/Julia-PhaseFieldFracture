@@ -234,3 +234,107 @@ function assemble_L2_matrix(dh::DofHandler, cv_d::CellValues)
     end
     return K_sparse
 end
+
+
+"""
+M-EM 求解器的不同策略集下的迭代求解函数
+"""
+# ====================================================================
+# [内部函数] 无约束 Newton (Eq 47)
+# ====================================================================
+function solve_newton_inactive!(
+    a_cur, K_mono, r_mono, dh, ch_zero, H_old, mat, cv_u, cv_d, max_iter, tol
+)
+    for iter in 1:max_iter
+        assemble_monolithic!(K_mono, r_mono, dh, a_cur, H_old, mat, cv_u, cv_d)
+        
+        r_check = -copy(r_mono)
+        apply_zero!(r_check, ch_zero)
+        res_norm = norm(r_check)
+        
+        if res_norm < tol
+            return true, a_cur, iter
+        end
+
+        apply_zero!(K_mono, r_mono, ch_zero)
+        Δa = K_mono \ (-r_mono)
+        a_cur .+= Δa
+    end
+    return false, a_cur, max_iter
+end
+
+
+# ====================================================================
+# [内部函数] 增广系统 Newton (Eq 44, 45) - 舒尔补极致优化版
+# ====================================================================
+function solve_newton_active!(
+    a_cur, a_prev, λ_rho, K_mono, r_mono, dh, ch_zero, ch_a, H_old, mat, cv_u, cv_d, 
+    M_d, ρ, idx_u, idx_d, max_iter, tol
+)
+    n_dofs = length(a_cur)
+    pdofs = ch_zero.prescribed_dofs
+    
+    for iter in 1:max_iter
+        # 1. 组装标准单块刚度矩阵和残差
+        assemble_monolithic!(K_mono, r_mono, dh, a_cur, H_old, mat, cv_u, cv_d)
+        
+        # 2. 计算约束 g_val = (d - d_prev)^T * M_d * (d - d_prev) - ρ^2
+        Δd = a_cur[idx_d] .- a_prev[idx_d]
+        M_Δd = M_d * Δd
+        g_val = dot(Δd, M_Δd) - ρ^2
+        
+        # 约束梯度 dg_da (在全局自由度下)
+        dg_da = zeros(n_dofs)
+        dg_da[idx_d] .= 2.0 .* M_Δd
+        
+        # 3. 构造修正后的标准单块稀疏矩阵 K_aug_base = K_mono + [0 0; 0 2*λ_rho*M_d]
+        K_aug_base = copy(K_mono)
+        I, J, V = findnz(M_d)
+        for k in eachindex(V)
+            # 仅在非零元素上叠加修改，保持稀疏性
+            K_aug_base[idx_d[I[k]], idx_d[J[k]]] += 2.0 * λ_rho * V[k]
+        end
+        
+        # 4. 检查收敛性 (计算增广系统残差)
+        r_aug_a = r_mono .+ λ_rho .* dg_da
+        
+        r_check = zeros(n_dofs + 1)
+        r_check[1:n_dofs] .= r_aug_a
+        r_check[end] = g_val
+        r_check[pdofs] .= 0.0  # 忽略 Dirichlet 约束自由度
+        
+        res_norm = norm(r_check)
+        if res_norm < tol
+            return true, a_cur, λ_rho, iter
+        end
+
+        # 5. 施加齐次 Dirichlet 边界条件 (利用 Ferrite 内置的高效方法)
+        # 这会将 K_aug_base 中 pdofs 对应的行和列置零，对角线置 1
+        apply_zero!(K_aug_base, r_aug_a, ch_zero)
+        
+        # 约束梯度也必须在 Dirichlet 自由度处清零，以保持线性系统的相容性
+        dg_da_bc = copy(dg_da)
+        dg_da_bc[pdofs] .= 0.0
+
+        # 6. 【核心】通过舒尔补求解，不破坏大矩阵的稀疏结构
+        # 求解两个 N*N 的稀疏线性方程组
+        v_r = K_aug_base \ (-r_aug_a)
+        v_g = K_aug_base \ (-dg_da_bc)
+        
+        # 求解对偶变量增量 Δλ
+        denom = dot(dg_da_bc, v_g)
+        if abs(denom) < 1e-12
+            denom = sign(denom) * 1e-12 # 防止分母为 0 导致数值崩溃
+        end
+        Δλ = (-g_val - dot(dg_da_bc, v_r)) / denom
+        
+        # 计算位移/相场增量 (Dirichlet 自由度处的增量自动为 0)
+        Δa = v_r .+ Δλ .* v_g
+        
+        # 7. 更新变量
+        a_cur .+= Δa
+        λ_rho += Δλ
+    end
+    
+    return false, a_cur, λ_rho, max_iter
+end

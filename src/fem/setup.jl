@@ -438,3 +438,109 @@ function setup_l_tension_monolithic(;
     
     return MonolithicTensionSetup(grid, dh, ch_ref, ch_zero, crack_nodes, final_displacement)
 end
+
+
+"""
+    MonolithicTensionSetup_MEM (适配 M-EM 算法)
+
+保存算例的有限元初始化结果。
+包含了全局单片 dh，纯相场 dh_d，以及时间依赖的 ch_a 和齐次的 ch_zero。
+"""
+struct MonolithicTensionSetup_MEM
+    grid::Grid
+    dh::DofHandler
+    dh_d::DofHandler            # 【新增】：专用于组装相场质量矩阵 M_d
+    ch_a::ConstraintHandler     # 【修改】：随时间 t 动态更新的边界条件
+    ch_zero::ConstraintHandler  # 用于 Newton 修正步的齐次边界条件
+    crack_nodes::Vector{Int}
+    final_displacement::Float64 
+end
+
+"""
+为整体式求解格式创建一个包含位移场(:u)和相场(:d)的统一自由度处理器。
+"""
+function create_monolithic_dofhandler_mem(grid)
+    dh_a = Ferrite.DofHandler(grid)
+    Ferrite.add!(dh_a, :u, Ferrite.Lagrange{Ferrite.RefQuadrilateral, 1}()^2)
+    Ferrite.add!(dh_a, :d, Ferrite.Lagrange{Ferrite.RefQuadrilateral, 1}())
+    Ferrite.close!(dh_a)
+    return dh_a
+end
+
+"""
+【新增】创建一个纯相场的自由度处理器 (为了方便计算 M_d)
+"""
+function create_d_dofhandler_mem(grid)
+    dh_d = Ferrite.DofHandler(grid)
+    Ferrite.add!(dh_d, :d, Ferrite.Lagrange{Ferrite.RefQuadrilateral, 1}())
+    Ferrite.close!(dh_d)
+    return dh_d
+end
+
+"""
+为 M-EM 算法创建边界条件。
+"""
+function create_mem_bcs(dh, grid, crack_nodes, final_displacement = 0.0)
+    top = Ferrite.getfacetset(grid, "top")
+    right = Ferrite.getfacetset(grid, "right")
+
+    # ==============================================================
+    # 1. ch_a: 随时间 t 动态缩放的边界条件 (用于 Predictor 和收敛判断)
+    # ==============================================================
+    ch_a = Ferrite.ConstraintHandler(dh)
+    
+    # 顶边全固定
+    Ferrite.add!(ch_a, Ferrite.Dirichlet(:u, top, (x, t) -> zeros(2), [1, 2]))
+    
+    # 【核心修改】：右侧施加随 t 变化的位移。
+    # 因为求解器中会调用 update!(ch_a, t_cur / t_max)，这里的 t 会在 0 到 1 之间变化。
+    Ferrite.add!(ch_a, Ferrite.Dirichlet(:u, right, (x, t) -> t * final_displacement, 2))
+    
+    # 预制裂纹相场约束
+    if !isempty(crack_nodes)
+        # 注意：由于这是实际状态，预制裂纹处的相场应该是 1.0 (完全破坏)
+        Ferrite.add!(ch_a, Ferrite.Dirichlet(:d, Set(crack_nodes), (x, t) -> 1.0))
+    end
+    Ferrite.close!(ch_a)
+    Ferrite.update!(ch_a, 0.0) # 初始时刻 t=0.0
+
+    # ==============================================================
+    # 2. ch_zero: 齐次边界条件 (用于 Newton 校正步求解 Δx)
+    # ==============================================================
+    ch_zero = Ferrite.ConstraintHandler(dh)
+    
+    # 顶边全固定 (0.0)
+    Ferrite.add!(ch_zero, Ferrite.Dirichlet(:u, top, (x, t) -> zeros(2), [1, 2]))
+    
+    # 右侧受控端：必须锁定为 0.0 (Newton 修正步不能改变边界的值)
+    Ferrite.add!(ch_zero, Ferrite.Dirichlet(:u, right, (x, t) -> 0.0, 2))
+    
+    # 预制裂纹相场约束: 增量必须为 0.0
+    if !isempty(crack_nodes)
+        Ferrite.add!(ch_zero, Ferrite.Dirichlet(:d, Set(crack_nodes), (x, t) -> 0.0))
+    end
+    Ferrite.close!(ch_zero)
+    Ferrite.update!(ch_zero, 0.0)
+
+    return ch_a, ch_zero
+end
+
+"""
+一站式初始化函数（M-EM 整体式版本）。
+"""
+function setup_l_tension_mem(;
+    msh_file = "data/mesh/l_shape.msh",
+    final_displacement = -0.8, 
+)
+    grid = create_l_shape_grid(msh_file)
+    crack_nodes = Int[] 
+    
+    # 1. 创建整体式 DofHandler 和纯相场 DofHandler
+    dh = create_monolithic_dofhandler_mem(grid)
+    dh_d = create_d_dofhandler_mem(grid)
+    
+    # 2. 获取 M-EM 专用的两套 ConstraintHandler
+    ch_a, ch_zero = create_mem_bcs(dh, grid, crack_nodes, final_displacement)
+    
+    return MonolithicTensionSetup_MEM(grid, dh, dh_d, ch_a, ch_zero, crack_nodes, final_displacement)
+end
