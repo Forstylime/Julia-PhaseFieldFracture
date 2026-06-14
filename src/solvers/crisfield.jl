@@ -9,13 +9,15 @@ Crisfield 弧长法求解器
 """
 function solve_crisfield(
     setup::MonolithicTensionSetup, mat::PhaseFieldMaterial;
-    ρ_init::Float64 = 0.02,
-    max_steps::Int = 200,
+    ρ_init::Float64 = 0.01,
+    max_steps::Int = 500,
     tol::Float64 = 1e-6,
     max_newton::Int = 15,
     output_freq::Int = 10,
     λ_max::Float64 = 1.0,
+    enforce_irreversibility::Bool = true
 )
+    dir = setup.dir
     grid = setup.grid
     dh = setup.dh
     ch_ref = setup.ch_ref
@@ -36,14 +38,13 @@ function solve_crisfield(
     end
     idx_u = unique(idx_u); idx_d = unique(idx_d)
 
-    # 提取右端点位移自由度（算反力用）
     coords_x = [node.x[1] for node in grid.nodes]
     right_x = maximum(coords_x)
     right_dofs = Int[]
     for cell in CellIterator(dh)
         for (i, node_id) in enumerate(cell.nodes)
             if isapprox(grid.nodes[node_id].x[1], right_x; atol = 1e-8)
-                push!(right_dofs, celldofs(cell)[u_range[(i-1)*2 + 2]])
+                push!(right_dofs, celldofs(cell)[u_range[(i-1)*2 + dir]])
             end
         end
     end
@@ -58,7 +59,7 @@ function solve_crisfield(
     cv_u = CellValues(qr, Lagrange{RefQuadrilateral, 1}()^2)
     cv_d = CellValues(qr, Lagrange{RefQuadrilateral, 1}())
     n_qpoints = getncells(grid) * getnquadpoints(cv_u)
-    H_old = zeros(n_qpoints)
+    driving_force = zeros(n_qpoints)
 
     K_mono = allocate_matrix(dh)
     r_mono = zeros(n_dofs)
@@ -68,7 +69,7 @@ function solve_crisfield(
     elastic_energies = Float64[0.0]
     surface_energies = Float64[0.0]
 
-    mkpath("data/sims/crisfield")
+    mkpath("data/sims/crisfield2")
     ρ = ρ_init
     Δa_n = zeros(n_dofs) # 上一个收敛步的总增量，用于判断前进方向
     n_step = 1
@@ -82,7 +83,7 @@ function solve_crisfield(
         # =============================================
         # PHASE 1: PREDICTOR (预测步)
         # =============================================
-        assemble_monolithic!(K_mono, r_mono, dh, a_n, H_old, mat, cv_u, cv_d)
+        assemble_monolithic!(K_mono, r_mono, dh, a_n, driving_force, mat, cv_u, cv_d)
 
         K_f_pred = copy(K_mono)
         f_f_pred = zeros(n_dofs)
@@ -98,7 +99,7 @@ function solve_crisfield(
         if n_step == 1
             sign_δλ = 1.0
         else
-            sign_δλ = dot(Δa_n[idx_u], δa_λ_pred[idx_u]) >= 0.0 ? 1.0 : -1.0
+            sign_δλ = dot(Δa_n[idx_u], δa_λ_pred[idx_u]) + dot(Δa_n[idx_d], δa_λ_pred[idx_d]) >= 0.0 ? 1.0 : -1.0
         end
         
         δλ_pred = sign_δλ * abs_δλ_pred
@@ -116,7 +117,7 @@ function solve_crisfield(
         iters_newton = 0
         for iter in 1:max_newton
             iters_newton = iter
-            assemble_monolithic!(K_mono, r_mono, dh, a_cur, H_old, mat, cv_u, cv_d)
+            assemble_monolithic!(K_mono, r_mono, dh, a_cur, driving_force, mat, cv_u, cv_d)
 
             # --- 2.1. 收敛检查 ---
             r_check = -copy(r_mono)
@@ -177,20 +178,23 @@ function solve_crisfield(
             if iters_newton <= 3
                 ρ = min(ρ * 1.2, ρ_init * 5.0) # 设一个最大弧长限制
             end
+            if n_step == 150
+                ρ_init = ρ_init / 10
+            end
         else
             @warn "未在 $max_newton 次迭代内收敛。回退并减半弧长 ρ。"
             ρ *= 0.5
             continue # a_n 没被污染，直接重做 Predictor
         end
 
-        # 更新历史变量
-        update_history_mono!(H_old, dh, a_cur, mat, cv_u)
+        # 更新历史变量, driving_force 代表论文力的 H
+        compute_driving_force_mono!(driving_force, dh, a_cur, mat, cv_u, enforce_irreversibility)
 
         a_n .= a_cur
         λ_n = λ_cur
 
         # 为了计算严谨的反力和能量，最后用收敛态装配一次
-        assemble_monolithic!(K_mono, r_mono, dh, a_n, H_old, mat, cv_u, cv_d)
+        assemble_monolithic!(K_mono, r_mono, dh, a_n, driving_force, mat, cv_u, cv_d)
         f_reac = sum(r_mono[dof] for dof in right_dofs)
 
         # 记录数据 (这里 final_displacement 是参考基准)
@@ -200,14 +204,14 @@ function solve_crisfield(
         push!(surface_energies, surface_energy_monolithic(dh, a_n, mat, cv_d)) 
 
         if n_step % output_freq == 0
-            VTKGridFile("data/sims/crisfield/crisfield_step_$n_step", setup.grid) do vtk
+            VTKGridFile("data/sims/crisfield2/crisfield_step_$n_step", setup.grid) do vtk
                 write_solution(vtk, dh, a_n) 
             end
         end
         n_step += 1
     end
 
-    println("Crisfield 仿真结束！VTK 文件保存在 data/sims/crisfield 目录下。")
+    println("Crisfield 仿真结束！VTK 文件保存在 data/sims/crisfield2 目录下。")
     println("计算耗时: $(round(time() - t_start, digits=2)) 秒")
     return displacements, reaction_forces, elastic_energies, surface_energies
 end

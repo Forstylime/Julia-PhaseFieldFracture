@@ -29,25 +29,11 @@ include("utils/utils_fun.jl")
 include("utils/meshes.jl")
 
 export
+    # --- struct ---
     PhaseFieldMaterial,
-    strain_spectral_split,
-    tensile_energy_density,
-    refine_range,
-    refine_grid!,
-    TensionSetup,
-    MonolithicTensionSetup,
-    make_square_tension_grid,
-    create_l_shape_grid,
-    create_staggered_dofhandlers,
-    create_monolithic_dofhandler,
-    create_displacement_constraints,
-    create_phase_field_constraints,
-    create_monolithic_constraints,
-    initial_crack_nodes,
     # --- setups ---
-    setup_square_tension,
+    setup_tension_monolithic,
     setup_l_tension,
-    setup_l_tension_monolithic,
     setup_l_tension_mem,
     # --- energies ---
     elastic_energy,
@@ -70,12 +56,7 @@ export
     assemble_mass_matrix_d!,
     assemble_monolithic!,
     # --- utils ---
-    update_history!,
-    update_history_mono!,
     compute_g,
     get_right_dofs,
-    compute_reaction_forces,
-    adapt_rho!,
-    miehe_spectral_decomposition,
-    evaluate_gamma_constraint
+    compute_reaction_forces
 end

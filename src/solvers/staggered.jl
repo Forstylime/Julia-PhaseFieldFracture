@@ -14,9 +14,10 @@ using SparseArrays
 """
 function solve_staggered(
     setup::TensionSetup, mat::PhaseFieldMaterial;
-    n_steps = 100,          # 总载荷步数 (论文设为 100 步)
-    tol = 1e-5,             # Newton 迭代和交错循环的收敛容差
-    max_iter = 20           # 内层交错循环的最大允许次数
+    n_steps = 100,           # 总载荷步数 (论文设为 100 步)
+    tol = 1e-4,              # Newton 迭代和交错循环的收敛容差
+    max_iter = 20,           # 内层交错循环的最大允许次数
+    enforce_irreversibility::Bool = true # 控制参数
 )
     # --- 1. 提取网格与自由度 ---
     grid = setup.grid
@@ -25,7 +26,7 @@ function solve_staggered(
     ch_u = setup.ch_u
     ch_d = setup.ch_d
 
-    right_x_dofs = get_right_dofs(grid, dh_u)
+    right_x_dofs = get_right_dofs(grid, dh_u, 1)
     
     ndofs_u = ndofs(dh_u)
     ndofs_d = ndofs(dh_d)
@@ -48,7 +49,7 @@ function solve_staggered(
     
     # 计算总积分点数量，初始化历史变量 H
     n_qpoints = getncells(grid) * getnquadpoints(cv_u)
-    H_history = zeros(n_qpoints)
+    driving_force = zeros(n_qpoints)
     
     # 分配全局稀疏矩阵和向量
     K_u = allocate_matrix(dh_u)
@@ -63,7 +64,11 @@ function solve_staggered(
     surface_energies = Float64[0]
     
     # 建立 VTK 输出文件夹
-    mkpath("data/sims")
+    if enforce_irreversibility
+        mkpath("data/sims/staggered")
+    else
+        mkpath("data/sims/staggered2")
+    end
 
     # 计时和迭代计数
     t_start = time()
@@ -117,20 +122,30 @@ function solve_staggered(
             total_newton_iters += newton_iter
             
             # ==========================================
-            # 步骤 B: 更新不可逆历史变量 H
+            # 步骤 B: 计算相场驱动力
             # ==========================================
-            update_history!(H_history, dh_u, u_n, mat, cv_u)
+            compute_driving_force!(driving_force, dh_u, u_n, mat, cv_u, enforce_irreversibility)
             
             # ==========================================
-            # 步骤 C: 固定 u (其实是根据 H)，求解线性相场 d
+            # 步骤 C: 固定 u，求解线性相场 d
             # ==========================================
-            d_old_iter = copy(d_n) # 保存本 iter 开始时的相场，用于判断交错是否收敛
+            d_old_iter = copy(d_n) 
             
-            assemble_d!(K_d, F_d, dh_d, H_history, mat, cv_d)
-            apply!(K_d, F_d, ch_d) # 应用相场预制裂纹的强制边界条件
+            # 注意这里传入的是更新后的 driving_force
+            assemble_d!(K_d, F_d, dh_d, driving_force, mat, cv_d)
+            apply!(K_d, F_d, ch_d) 
             
             d_trial = K_d \ F_d
-            d_n .= clamp.(max.(d_trial, d_old_iter), 0.0, 1.0)
+            
+            # --- 分支判断：相场不可逆约束 ---
+            if enforce_irreversibility
+                # L型试件：不仅要保证 0 <= d <= 1，还要保证本步的相场不小于上一载荷步的相场 d_prev
+                d_n .= clamp.(max.(d_trial, d_prev), 0.0, 1.0)
+            else
+                # CT型试件：没有单调递增约束，只需要限制在物理区间 [0, 1] 内
+                d_n .= clamp.(d_trial, 0.0, 1.0)
+            end
+            
             apply!(d_n, ch_d)
             
             # ==========================================
@@ -169,15 +184,26 @@ function solve_staggered(
         
         # 每隔 5 步输出一次 VTK 以节约硬盘
         if step % 5 == 0 || step == n_steps
-            VTKGridFile("data/sims/staggered/fracture_step_$step", dh_u) do vtk
-                write_solution(vtk, dh_u, u_n)
-                write_solution(vtk, dh_d, d_n)
+            if enforce_irreversibility
+                VTKGridFile("data/sims/staggered/fracture_step_$step", dh_u) do vtk
+                    write_solution(vtk, dh_u, u_n)
+                    write_solution(vtk, dh_d, d_n)
+                end
+            else
+                VTKGridFile("data/sims/staggered2/fracture_step_$step", dh_u) do vtk
+                    write_solution(vtk, dh_u, u_n)
+                    write_solution(vtk, dh_d, d_n)
+                end
             end
         end
         
     end # 外层载荷增量循环结束
     
-    println("仿真结束！VTK 文件保存在 data/sims/staggered 目录下。")
+    if enforce_irreversibility
+        println("仿真结束！VTK 文件保存在 data/sims/staggered 目录下。")
+    else
+        println("仿真结束！VTK 文件保存在 data/sims/staggered2 目录下。")
+    end
     println("总Newton迭代次数: $total_newton_iters")
     println("计算耗时: $(round(time() - t_start, digits=2)) 秒")
     return displacements, reaction_forces, elastic_energies, surface_energies
